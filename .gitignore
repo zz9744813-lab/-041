@@ -7,3 +7,4 @@ data/faiss/
 exports/
 *.egg-info/
 .DS_Store
+app/data/novelforge.db
