@@ -1,130 +1,110 @@
-# NovelForge - AI 小说生成管理系统
+# ⚒️ NovelForge — AI 小说生成管理系统
 
-基于 FastAPI + React 19 的 AI 驱动小说创作平台，支持从"一句话创意"到"完整小说导出"的全流程 AI 生成。
+NovelForge 是一个本地部署的 AI 小说生成工作流系统。它把"一句话创意 → 世界观/角色设定 → 分卷大纲 → 章节正文 → 版本管理 → 续写 → 审校 → 导出"变成稳定、可恢复、可编辑的自动化流程。
+
+## ✨ 功能特性
+
+- **一句话创意生成设定** — 输入核心创意，AI 自动生成世界观、角色卡、主线冲突
+- **自动分卷大纲** — 基于设定生成完整的卷纲和章节细纲
+- **逐章自动生成** — 每章独立生成，含前情提要，保持连贯性
+- **章节版本管理** — 每次生成/润色/手动编辑都保留历史版本，可随时切换
+- **断点续写** — 失败自动记录，支持重试；暂停后可恢复
+- **批量生成** — 指定章节范围，自动逐章生成
+- **润色优化** — 减少模板化表达，提升自然度
+- **一致性检查** — 检测角色 OOC、世界观冲突、时间线矛盾
+- **自动摘要提取** — 每章生成后自动提取摘要、关键事件、伏笔
+- **多格式导出** — TXT、Markdown 格式导出完整小说
+- **模型配置管理** — 支持任何 OpenAI 兼容 API（硅基流动、DeepSeek、OpenAI 等）
 
 ## 🚀 快速开始
 
-### 后端启动
+### 1. 安装依赖
+
 ```bash
-cd backend
-python -m venv venv
+cd /opt/novelforge
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8788 --reload
 ```
 
-### 前端启动
+### 2. 配置环境变量（可选）
+
 ```bash
-cd frontend
-npm install
-npm run dev
+cp .env.example .env
+# 根据需求修改配置
 ```
 
-前端开发服务器运行在 `http://localhost:5173`，API 请求通过代理转发到后端 `http://localhost:8788`。
+### 3. 启动系统
 
-## 📖 使用流程
+```bash
+source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8788
+```
 
-### 1. 配置模型
-1. 进入"模型配置"页面
-2. 添加 API 地址（支持任何 OpenAI-compatible API，如 SiliconFlow、DeepSeek 等）
-3. 填入 API Key 和模型名
-4. 点击"测试连接"验证
-5. 设为默认模型
+浏览器打开 http://localhost:8788
 
-### 2. 创建项目并填入创意
-1. 新建项目
-2. 填写项目标题、题材、风格
-3. 在"一句话创意"中输入故事核心创意
+### 4. 配置模型
 
-### 3. 生成设定
-点击"生成设定"→ AI 自动生成：
-- 世界观
-- 力量体系
-- 主线剧情
-- 角色列表
+1. 打开「设置」页面
+2. 点击「添加模型」
+3. 填写 Base URL（如 `https://api.siliconflow.cn/v1`）
+4. 填写 API Key 和模型名称
+5. 保存并设为默认
 
-### 4. 生成大纲
-点击"生成大纲"→ AI 自动生成：
-- 分卷结构
-- 各章节大纲
+### 5. 创建小说项目
 
-### 5. 生成章节
-- 点击章节的"生成正文"→ AI 根据设定和大纲生成正文
-- 支持续写、润色、一致性检查
+1. 点击「新建项目」
+2. 填写名称、一句话创意、类型和风格
+3. 创建后在项目详情页点击「生成设定」
+4. 再点击「生成大纲」
+5. 最后点击「生成下一章」自动逐章生成
 
-### 6. 导出
-- TXT 导出（纯文本格式）
-- Markdown 导出（带 YAML frontmatter）
-
-## 🧠 AI 生成能力
-
-| 功能 | 说明 |
-|------|------|
-| 设定生成 | 根据创意生成世界观、角色、主线 |
-| 大纲生成 | 根据设定生成分卷和章节大纲 |
-| 章节生成 | 根据大纲+前情生成正文 |
-| 续写 | 在已有内容基础上继续写作 |
-| 润色 | 修改语病、优化文笔 |
-| 摘要提取 | 自动提取章节摘要 |
-| 一致性检查 | 检查章节内容与设定是否矛盾 |
-| 版本管理 | 每次生成保存为新版本，不覆盖旧内容 |
-
-## 🗂️ 技术栈
-
-**后端**
-- FastAPI - API 框架
-- SQLAlchemy - ORM（SQLite + WAL 模式）
-- Pydantic - 数据验证
-- httpx - LLM API 调用
-
-**前端**
-- React 19 - UI 框架
-- React Router - 路由
-- TanStack Query - 数据同步
-- Vite - 构建工具
-- Tailwind CSS v4 - 样式
-
-## ⚙️ 配置
-
-后端默认端口 8788，通过环境变量配置：
-- `DATABASE_URL` - 数据库路径（默认 `sqlite:///data/novel.db`）
-- `APP_HOST` - 监听地址
-- `APP_PORT` - 监听端口
-- `REQUEST_TIMEOUT_SECONDS` - LLM 请求超时
-
-## 📁 项目结构
+## 🗂️ 项目结构
 
 ```
 novelforge/
-├── backend/
-│   ├── app/
-│   │   ├── models.py       # SQLAlchemy 模型（12个表）
-│   │   ├── schemas.py      # Pydantic 验证模型
-│   │   ├── main.py         # FastAPI 入口
-│   │   ├── database.py     # 数据库连接（WAL模式）
-│   │   ├── routers/        # API 路由
-│   │   ├── services/       # 业务逻辑层
-│   │   └── prompts/        # AI 提示词模板
-│   ├── data/               # SQLite 数据库
-│   └── requirements.txt
-├── frontend/               # React 前端
+├── app/
+│   ├── main.py              # FastAPI 入口
+│   ├── config.py            # 配置管理
+│   ├── database.py          # 数据库初始化 (SQLite + WAL)
+│   ├── models/              # 数据库模型（7个表）
+│   ├── schemas/             # Pydantic 验证
+│   ├── routers/             # Web 路由（7个模块）
+│   ├── services/            # 业务逻辑（9个服务）
+│   ├── prompts/             # AI 提示词模板（6个）
+│   ├── templates/           # Jinja2 页面模板
+│   └── static/              # 静态资源（CSS/JS）
+├── data/                    # SQLite 数据库
+│   └── faiss/               # 向量存储（预留）
+├── exports/                 # 导出文件目录
+├── systemd/                 # Systemd 服务配置
+├── requirements.txt
+├── .env.example
 └── README.md
 ```
 
-## 🔧 常见错误
+## 🔧 技术栈
 
-**"No default model configured"**
-→ 先在模型配置页面添加并设为默认模型。
+- **后端**：FastAPI + SQLAlchemy + Pydantic
+- **数据库**：SQLite（WAL 模式）
+- **前端**：Jinja2 + HTML + CSS + 原生 JS
+- **AI 接口**：OpenAI-compatible API
+- **端口**：8788
 
-**"Project has no idea set"**
-→ 在项目编辑页面填写"一句话创意"。
+## 📡 API 文档
 
-**"LLM API call failed"**
-→ 检查 API Key 是否正确，模型名是否支持，网络是否可达。
+启动后访问 `/docs` 查看自动生成的 API 文档。
 
-**端口冲突**
-→ 设置环境变量 `APP_PORT=8788` 避免与 Hermes Bridge（8787）冲突。
+## ⚙️ Systemd 部署
 
-## 📄 许可证
+```bash
+cp systemd/novelforge.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable novelforge
+systemctl start novelforge
+systemctl status novelforge
+```
+
+## 📄 License
 
 MIT

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}设置 - NovelForge{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>⚙️ 模型设置</h1>
+    <button class="btn btn-primary" onclick="showAddModelModal()">+ 添加模型</button>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+    <h3 class="card-title">📌 使用提示</h3>
+    <p style="font-size:13px;color:var(--text2);">
+        需要配置至少一个默认模型才能进行生成操作。<br>
+        支持任何 OpenAI 兼容的 API，例如：OpenAI、硅基流动、DeepSeek、智谱等。<br>
+        Base URL 示例：<code>https://api.siliconflow.cn/v1</code>
+    </p>
+</div>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+{% if models %}
+<div style="display:grid;gap:12px;">
+    {% for m in models %}
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start;">
+            <div>
+                <h3 style="font-size:16px;font-weight:600;">
+                    {{ m.name }}
+                    {% if m.is_default %}<span class="badge badge-completed">默认</span>{% endif %}
+                </h3>
+                <div style="font-size:13px;color:var(--text2);margin-top:4px;">
+                    <div>提供商：{{ m.provider }}</div>
+                    <div>模型：{{ m.model }}</div>
+                    <div>Base URL：{{ m.base_url }}</div>
+                    <div>API Key：****{{ m.api_key[-4:] if m.api_key and m.api_key|length > 4 else '****' }}</div>
+                    <div>Temperature：{{ m.temperature }} · Max Tokens：{{ m.max_tokens }}</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:4px;">
+                {% if not m.is_default %}
+                <form method="POST" action="/settings/models/{{ m.id }}/set-default" style="display:inline">
+                    <button class="btn btn-sm btn-secondary">设为默认</button>
+                </form>
+                {% endif %}
+                <form method="POST" action="/settings/models/{{ m.id }}/test" style="display:inline">
+                    <button class="btn btn-sm btn-secondary">测试</button>
+                </form>
+                <form method="POST" action="/settings/models/{{ m.id }}/delete" style="display:inline" onsubmit="return confirmDelete()">
+                    <button class="btn btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <h2>尚未配置模型</h2>
+    <p>点击"添加模型"配置你的第一个 AI 模型</p>
+</div>
+{% endif %}
+
+<!-- 添加模型模态框 -->
+<div id="add-model-modal" class="overlay">
+    <div class="overlay-content">
+        <h3>+ 添加模型配置</h3>
+        <form method="POST" action="/settings/models/add">
+            <div class="form-group">
+                <label>名称 *</label>
+                <input type="text" name="name" class="form-input" required placeholder="例如：硅基流动">
+            </div>
+            <div class="form-group">
+                <label>提供商</label>
+                <select name="provider" class="form-select">
+                    <option value="openai">OpenAI</option>
+                    <option value="siliconflow">硅基流动</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="zhipu">智谱</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="other">其他</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Base URL *</label>
+                <input type="url" name="base_url" class="form-input" required placeholder="https://api.siliconflow.cn/v1">
+            </div>
+            <div class="form-group">
+                <label>API Key *</label>
+                <input type="password" name="api_key" class="form-input" required placeholder="sk-...">
+                <div class="form-hint">API key 不会明文显示在页面上</div>
+            </div>
+            <div class="form-group">
+                <label>模型名称 *</label>
+                <input type="text" name="model" class="form-input" required placeholder="Qwen/Qwen2.5-7B-Instruct">
+            </div>
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Temperature</label>
+                    <input type="number" name="temperature" class="form-input" step="0.1" min="0" max="2" value="0.7">
+                </div>
+                <div class="form-group">
+                    <label>Max Tokens</label>
+                    <input type="number" name="max_tokens" class="form-input" min="256" max="32768" value="4096">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="is_default" value="1" checked>
+                    设为默认模型
+                </label>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="hideAddModelModal()">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function showAddModelModal() { document.getElementById('add-model-modal').classList.add('show'); }
+function hideAddModelModal() { document.getElementById('add-model-modal').classList.remove('show'); }
+document.getElementById('add-model-modal').addEventListener('click', function(e) {
+    if (e.target === this) hideAddModelModal();
+});
+</script>
+{% endblock %}
