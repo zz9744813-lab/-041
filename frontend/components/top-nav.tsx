@@ -21,8 +21,8 @@ const NAV = [
   { href: '/watchlist', label: '观察池', icon: ListChecks },
   { href: '/signals', label: '信号', icon: TrendingUp },
   { href: '/positions', label: '持仓', icon: Briefcase },
-  { href: '/trades', label: '交易', icon: History },
-  { href: '/models', label: '模型', icon: BarChart3 },
+  { href: '/trades', label: '交易记录', icon: History },
+  { href: '/models', label: '策略模型', icon: BarChart3 },
   { href: '/reviews', label: '复盘', icon: ScrollText },
   { href: '/system', label: '系统', icon: Settings },
 ];

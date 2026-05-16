@@ -1,4 +1,8 @@
-"""SQLAlchemy 2.x engine + session factory."""
+"""SQLAlchemy 2.x engine + session factory.
+
+Supports both PostgreSQL (production) and SQLite (local dev / smoke test).
+SQLite is auto-detected from the URL prefix.
+"""
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
@@ -8,14 +12,23 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# Use psycopg (v3) sync engine. Async support can be added later.
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    future=True,
-)
+_is_sqlite = settings.database_url.startswith("sqlite")
+
+if _is_sqlite:
+    # SQLite engine - no pool_size; allow same-thread sharing for the FastAPI app.
+    engine = create_engine(
+        settings.database_url,
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+else:
+    engine = create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        future=True,
+    )
 
 SessionLocal = sessionmaker(
     autocommit=False,
