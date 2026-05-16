@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Trade
+from app.schemas import TradeOut
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=list[TradeOut])
 def list_trades(
     status: str | None = None,
     model: str | None = None,
@@ -27,7 +28,7 @@ def list_trades(
     return db.scalars(stmt).all()
 
 
-@router.get("/{trade_id}")
+@router.get("/{trade_id}", response_model=TradeOut)
 def get_trade(trade_id: int, db: Session = Depends(get_db)):
     t = db.get(Trade, trade_id)
     if not t:
@@ -35,9 +36,8 @@ def get_trade(trade_id: int, db: Session = Depends(get_db)):
     return t
 
 
-@router.post("/{trade_id}/close")
+@router.post("/{trade_id}/close", response_model=TradeOut)
 def close_trade_manually(trade_id: int, db: Session = Depends(get_db)):
-    """Manual close at last known close price - delegates to paper_trading_service."""
     from app.services import paper_trading_service
 
     t = db.get(Trade, trade_id)

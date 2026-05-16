@@ -2,17 +2,18 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import desc, func, select
+from sqlalchemy import Integer, cast, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Asset, Candle, LlmCallLog, Signal, SystemHealth
+from app.schemas import SystemHealthOut
 from app.utils.time_utils import expected_latest_final_bar_start, utc_now
 
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/health", response_model=list[SystemHealthOut])
 def health(db: Session = Depends(get_db)):
     stmt = (
         select(SystemHealth)
@@ -25,17 +26,20 @@ def health(db: Session = Depends(get_db)):
 @router.get("/llm-stats")
 def llm_stats(days: int = 7, db: Session = Depends(get_db)):
     since = utc_now() - timedelta(days=days)
-    stmt = select(
-        func.date(LlmCallLog.created_at).label("day"),
-        LlmCallLog.purpose,
-        func.count().label("total"),
-        func.sum(func.cast(LlmCallLog.cached, type_=__import__("sqlalchemy").Integer)).label(
-            "cached_hits"
-        ),
-        func.sum(LlmCallLog.input_tokens).label("input_tokens"),
-        func.sum(LlmCallLog.output_tokens).label("output_tokens"),
-        func.sum(LlmCallLog.cost_usd).label("cost_usd"),
-    ).where(LlmCallLog.created_at >= since).group_by("day", LlmCallLog.purpose).order_by(desc("day"))
+    stmt = (
+        select(
+            func.date(LlmCallLog.created_at).label("day"),
+            LlmCallLog.purpose,
+            func.count().label("total"),
+            func.sum(cast(LlmCallLog.cached, Integer)).label("cached_hits"),
+            func.sum(LlmCallLog.input_tokens).label("input_tokens"),
+            func.sum(LlmCallLog.output_tokens).label("output_tokens"),
+            func.sum(LlmCallLog.cost_usd).label("cost_usd"),
+        )
+        .where(LlmCallLog.created_at >= since)
+        .group_by("day", LlmCallLog.purpose)
+        .order_by(desc("day"))
+    )
     rows = db.execute(stmt).all()
     return [
         {
@@ -54,7 +58,7 @@ def llm_stats(days: int = 7, db: Session = Depends(get_db)):
 @router.get("/data-freshness")
 def data_freshness(db: Session = Depends(get_db)):
     now = utc_now()
-    out = []
+    out: list[dict] = []
     assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
     for asset in assets:
         for tf in ("1d", "4h", "1h"):

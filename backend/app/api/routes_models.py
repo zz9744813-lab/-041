@@ -5,16 +5,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ModelStat, StrategyModel, Trade
+from app.schemas import ModelStatOut, StrategyModelOut, TradeOut
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=list[StrategyModelOut])
 def list_models(db: Session = Depends(get_db)):
     return db.scalars(select(StrategyModel).order_by(StrategyModel.name)).all()
 
 
-@router.get("/{name}/stats")
+@router.get("/{name}/stats", response_model=ModelStatOut)
 def model_stats(name: str, window: str = "LAST_30D", db: Session = Depends(get_db)):
     stmt = select(ModelStat).where(ModelStat.model_name == name, ModelStat.window == window)
     s = db.scalars(stmt).first()
@@ -23,7 +24,7 @@ def model_stats(name: str, window: str = "LAST_30D", db: Session = Depends(get_d
     return s
 
 
-@router.patch("/{name}")
+@router.patch("/{name}", response_model=StrategyModelOut)
 def update_model(
     name: str,
     weight: float | None = None,
@@ -46,7 +47,7 @@ def update_model(
     return m
 
 
-@router.get("/{name}/recent-trades")
+@router.get("/{name}/recent-trades", response_model=list[TradeOut])
 def recent_trades(name: str, limit: int = 50, db: Session = Depends(get_db)):
     stmt = (
         select(Trade)

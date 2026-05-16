@@ -7,6 +7,7 @@ import useSWR from 'swr';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import {
   Table,
   TableBody,
@@ -20,7 +21,7 @@ import type { TradeRow } from '@/lib/types';
 import { cn, downloadCSV, fmt, fmtPct } from '@/lib/utils';
 
 export default function Trades() {
-  const { data: trades } = useSWR<TradeRow[]>(
+  const { data: trades, error } = useSWR<TradeRow[]>(
     '/api/trades?status=CLOSED&limit=200',
     fetcher,
     { refreshInterval: 60000 },
@@ -60,64 +61,80 @@ export default function Trades() {
           <CardDescription>P&L / R Multiple / 退出原因</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead className="text-right">Entry</TableHead>
-                <TableHead className="text-right">Exit</TableHead>
-                <TableHead className="text-right">P&L</TableHead>
-                <TableHead className="text-right">P&L %</TableHead>
-                <TableHead className="text-right">R</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {trades?.map((t) => {
-                const pnl = Number(t.pnl_amount ?? 0);
-                const won = pnl > 0;
-                return (
-                  <TableRow key={t.id}>
-                    <TableCell className="font-mono">{t.symbol}</TableCell>
-                    <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
-                    <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {t.exit_price ? fmt(t.exit_price, 4) : '—'}
-                    </TableCell>
-                    <TableCell
-                      className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}
-                    >
-                      ${fmt(t.pnl_amount, 2)}
-                    </TableCell>
-                    <TableCell
-                      className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}
-                    >
-                      {fmtPct(t.pnl_pct)}
-                    </TableCell>
-                    <TableCell
-                      className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}
-                    >
-                      {t.realized_r_multiple ? `${fmt(t.realized_r_multiple, 2)}R` : '—'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={exitReasonVariant(t.exit_reason)}>{t.exit_reason ?? '—'}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/reviews?trade_id=${t.id}`}>
-                        <Button variant="ghost" size="sm">
-                          <FileText className="h-3.5 w-3.5 mr-1" /> 复盘
-                        </Button>
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          {(!trades || trades.length === 0) && (
-            <p className="text-zinc-500 p-6 text-sm">还没有已平仓交易。</p>
+          {error ? (
+            <ErrorState error={error} />
+          ) : !trades ? (
+            <LoadingState />
+          ) : trades.length === 0 ? (
+            <EmptyState message="还没有已平仓交易" hint="持仓触发 SL/TP/MANUAL 后会出现在这里" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead className="text-right">Entry</TableHead>
+                  <TableHead className="text-right">Exit</TableHead>
+                  <TableHead className="text-right">P&L</TableHead>
+                  <TableHead className="text-right">P&L %</TableHead>
+                  <TableHead className="text-right">R</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {trades.map((t) => {
+                  const pnl = Number(t.pnl_amount ?? 0);
+                  const won = pnl > 0;
+                  return (
+                    <TableRow key={t.id}>
+                      <TableCell className="font-mono">{t.symbol}</TableCell>
+                      <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
+                      <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {t.exit_price ? fmt(t.exit_price, 4) : '—'}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'text-right font-mono',
+                          won ? 'text-green-400' : 'text-red-400',
+                        )}
+                      >
+                        ${fmt(t.pnl_amount, 2)}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'text-right font-mono',
+                          won ? 'text-green-400' : 'text-red-400',
+                        )}
+                      >
+                        {fmtPct(t.pnl_pct)}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'text-right font-mono',
+                          won ? 'text-green-400' : 'text-red-400',
+                        )}
+                      >
+                        {t.realized_r_multiple ? `${fmt(t.realized_r_multiple, 2)}R` : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={exitReasonVariant(t.exit_reason)}>
+                          {t.exit_reason ?? '—'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Link href={`/reviews?trade_id=${t.id}`}>
+                          <Button variant="ghost" size="sm">
+                            <FileText className="h-3.5 w-3.5 mr-1" /> 复盘
+                          </Button>
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

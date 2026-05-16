@@ -7,6 +7,7 @@ import { DrawdownChart } from '@/components/charts/drawdown';
 import { EquityCurveChart } from '@/components/charts/equity-curve';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { fetcher } from '@/lib/fetcher';
 import type {
   DrawdownPoint,
@@ -27,27 +28,19 @@ function regimeColor(regime: string | null | undefined): 'success' | 'warning' |
 }
 
 export default function Home() {
-  const { data: portfolio } = useSWR<PortfolioSnapshot>('/api/portfolio', fetcher, {
+  const portfolioR = useSWR<PortfolioSnapshot | null>('/api/portfolio', fetcher, {
     refreshInterval: 30000,
   });
-  const { data: regime } = useSWR<RegimeRow>('/api/market/regime', fetcher, {
-    refreshInterval: 60000,
-  });
-  const { data: signals } = useSWR<SignalRow[]>('/api/signals?limit=10', fetcher, {
-    refreshInterval: 30000,
-  });
-  const { data: equityCurve } = useSWR<EquityCurvePoint[]>(
-    '/api/portfolio/equity-curve?days=30',
-    fetcher,
-  );
-  const { data: drawdown } = useSWR<DrawdownPoint[]>('/api/portfolio/drawdown?days=30', fetcher);
-  const { data: healthRows } = useSWR<SystemHealthRow[]>('/api/system/health', fetcher, {
-    refreshInterval: 60000,
-  });
+  const regimeR = useSWR<RegimeRow>('/api/market/regime', fetcher, { refreshInterval: 60000 });
+  const signalsR = useSWR<SignalRow[]>('/api/signals?limit=10', fetcher, { refreshInterval: 30000 });
+  const equityR = useSWR<EquityCurvePoint[]>('/api/portfolio/equity-curve?days=30', fetcher);
+  const drawdownR = useSWR<DrawdownPoint[]>('/api/portfolio/drawdown?days=30', fetcher);
+  const healthR = useSWR<SystemHealthRow[]>('/api/system/health', fetcher, { refreshInterval: 60000 });
 
+  const portfolio = portfolioR.data ?? null;
   const totalReturn = portfolio ? Number(portfolio.total_return_pct) : 0;
   const drawdownPct = portfolio ? Number(portfolio.max_drawdown_pct) : 0;
-  const recentFailed = (healthRows ?? []).filter((h) => h.status === 'FAILED').length;
+  const recentFailed = (healthR.data ?? []).filter((h) => h.status === 'FAILED').length;
   const llmFailureBanner = recentFailed >= 2;
   const drawdownBanner = drawdownPct >= 0.05;
 
@@ -66,20 +59,20 @@ export default function Home() {
 
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">Mini Hermes Dashboard</h1>
-        <Badge variant={regimeColor(regime?.regime)}>
-          {regime?.regime ?? 'REGIME_PENDING'}
+        <Badge variant={regimeColor(regimeR.data?.regime)}>
+          {regimeR.data?.regime ?? 'REGIME_PENDING'}
         </Badge>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard
           label="账户净值"
-          value={portfolio ? `$${fmt(portfolio.equity)}` : '—'}
+          value={portfolio ? `$${fmt(portfolio.equity)}` : portfolioR.error ? 'API 错误' : '加载中'}
           icon={<Briefcase className="h-4 w-4 text-zinc-500" />}
         />
         <KpiCard
           label="累计收益"
-          value={fmtPct(totalReturn)}
+          value={portfolio ? fmtPct(totalReturn) : '—'}
           tone={totalReturn > 0 ? 'up' : totalReturn < 0 ? 'down' : 'flat'}
           icon={
             totalReturn > 0 ? (
@@ -91,7 +84,7 @@ export default function Home() {
         />
         <KpiCard
           label="最大回撤"
-          value={fmtPct(drawdownPct)}
+          value={portfolio ? fmtPct(drawdownPct) : '—'}
           tone="down"
           icon={<AlertTriangle className="h-4 w-4 text-red-400" />}
         />
@@ -113,7 +106,18 @@ export default function Home() {
             <CardDescription>每日 PortfolioSnapshot 累计</CardDescription>
           </CardHeader>
           <CardContent>
-            <EquityCurveChart data={equityCurve ?? []} />
+            {equityR.error ? (
+              <ErrorState error={equityR.error} />
+            ) : !equityR.data ? (
+              <LoadingState />
+            ) : equityR.data.length === 0 ? (
+              <EmptyState
+                message="无 PortfolioSnapshot"
+                hint="运行 daily_report_job 后生成"
+              />
+            ) : (
+              <EquityCurveChart data={equityR.data} />
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -122,7 +126,15 @@ export default function Home() {
             <CardDescription>峰值至当前的相对跌幅</CardDescription>
           </CardHeader>
           <CardContent>
-            <DrawdownChart data={drawdown ?? []} />
+            {drawdownR.error ? (
+              <ErrorState error={drawdownR.error} />
+            ) : !drawdownR.data ? (
+              <LoadingState />
+            ) : drawdownR.data.length === 0 ? (
+              <EmptyState message="无回撤数据" />
+            ) : (
+              <DrawdownChart data={drawdownR.data} />
+            )}
           </CardContent>
         </Card>
       </div>
@@ -133,14 +145,24 @@ export default function Home() {
           <CardDescription>新的策略输出 + AI 修正</CardDescription>
         </CardHeader>
         <CardContent>
-          {!signals || signals.length === 0 ? (
-            <p className="text-sm text-zinc-500">
-              暂无信号。运行 <code>python -m app.scheduler</code> 或调用{' '}
-              <code>POST /api/signals/run</code>。
-            </p>
+          {signalsR.error ? (
+            <ErrorState error={signalsR.error} height={120} />
+          ) : !signalsR.data ? (
+            <LoadingState height={120} />
+          ) : signalsR.data.length === 0 ? (
+            <EmptyState
+              height={120}
+              message="暂无信号"
+              hint={
+                <>
+                  运行 <code>python -m app.scheduler</code> 或调用{' '}
+                  <code>POST /api/signals/run</code>
+                </>
+              }
+            />
           ) : (
             <ul className="text-sm space-y-1.5">
-              {signals.slice(0, 10).map((s) => (
+              {signalsR.data.slice(0, 10).map((s) => (
                 <li key={s.id} className="flex justify-between items-center">
                   <span className="flex items-center gap-2">
                     <span className="font-mono">{s.symbol}</span>

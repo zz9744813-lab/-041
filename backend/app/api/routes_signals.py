@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Signal
+from app.schemas import SignalOut
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=list[SignalOut])
 def list_signals(
     status: str | None = None,
     symbol: str | None = None,
@@ -26,7 +27,7 @@ def list_signals(
     return db.scalars(stmt).all()
 
 
-@router.get("/{signal_id}")
+@router.get("/{signal_id}", response_model=SignalOut)
 def get_signal(signal_id: int, db: Session = Depends(get_db)):
     s = db.get(Signal, signal_id)
     if not s:
@@ -36,17 +37,13 @@ def get_signal(signal_id: int, db: Session = Depends(get_db)):
 
 @router.post("/run")
 def run_signals_now(db: Session = Depends(get_db)):
-    """Manually trigger one signal generation pass.
-
-    Implementation deferred to Step 8 (signal generation job).
-    """
     from app.jobs.generate_signals_job import run as run_job
 
     stats = run_job()
     return {"ok": True, "stats": stats}
 
 
-@router.patch("/{signal_id}/reject")
+@router.patch("/{signal_id}/reject", response_model=SignalOut)
 def reject_signal(signal_id: int, reason: str = "manual reject", db: Session = Depends(get_db)):
     s = db.get(Signal, signal_id)
     if not s:

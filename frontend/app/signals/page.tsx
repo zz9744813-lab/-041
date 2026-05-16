@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import {
   Table,
   TableBody,
@@ -45,7 +46,7 @@ export default function Signals() {
   const [busy, setBusy] = useState(false);
 
   const url = `/api/signals?limit=200${statusFilter ? `&status=${statusFilter}` : ''}`;
-  const { data: signals, mutate } = useSWR<SignalRow[]>(url, fetcher, { refreshInterval: 30000 });
+  const { data: signals, error, mutate } = useSWR<SignalRow[]>(url, fetcher, { refreshInterval: 30000 });
 
   async function runNow() {
     setBusy(true);
@@ -110,50 +111,65 @@ export default function Signals() {
           <CardDescription>点击行查看详情</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Direction</TableHead>
-                <TableHead className="text-right">Conf</TableHead>
-                <TableHead className="text-right">R/R</TableHead>
-                <TableHead className="text-right">Entry</TableHead>
-                <TableHead className="text-right">Stop</TableHead>
-                <TableHead className="text-right">Target</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {signals?.map((s) => (
-                <TableRow
-                  key={s.id}
-                  onClick={() => setSelected(s)}
-                  className="cursor-pointer"
-                >
-                  <TableCell className="font-mono">{s.symbol}</TableCell>
-                  <TableCell className="text-zinc-400">{s.signal_type}</TableCell>
-                  <TableCell className="text-zinc-400">{s.direction}</TableCell>
-                  <TableCell className="text-right font-mono">{s.confidence_score}</TableCell>
-                  <TableCell className="text-right font-mono">
-                    {s.risk_reward_ratio ?? '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {s.entry_low ? `${fmt(s.entry_low)}-${fmt(s.entry_high)}` : '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {s.stop_loss ? fmt(s.stop_loss) : '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {s.target_1 ? fmt(s.target_1) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusVariant(s.status)}>{s.status}</Badge>
-                  </TableCell>
+          {error ? (
+            <ErrorState error={error} />
+          ) : !signals ? (
+            <LoadingState />
+          ) : signals.length === 0 ? (
+            <EmptyState
+              message="暂无信号"
+              hint={
+                <>
+                  运行 <code>python -m app.scheduler</code> 或点击右上「触发生成」按钮。
+                </>
+              }
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Direction</TableHead>
+                  <TableHead className="text-right">Conf</TableHead>
+                  <TableHead className="text-right">R/R</TableHead>
+                  <TableHead className="text-right">Entry</TableHead>
+                  <TableHead className="text-right">Stop</TableHead>
+                  <TableHead className="text-right">Target</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {signals.map((s) => (
+                  <TableRow
+                    key={s.id}
+                    onClick={() => setSelected(s)}
+                    className="cursor-pointer"
+                  >
+                    <TableCell className="font-mono">{s.symbol}</TableCell>
+                    <TableCell className="text-zinc-400">{s.signal_type}</TableCell>
+                    <TableCell className="text-zinc-400">{s.direction}</TableCell>
+                    <TableCell className="text-right font-mono">{s.confidence_score}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {s.risk_reward_ratio ?? '—'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {s.entry_low ? `${fmt(s.entry_low)}-${fmt(s.entry_high)}` : '—'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {s.stop_loss ? fmt(s.stop_loss) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {s.target_1 ? fmt(s.target_1) : '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={statusVariant(s.status)}>{s.status}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 

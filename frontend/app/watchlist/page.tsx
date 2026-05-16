@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import {
   Table,
   TableBody,
@@ -19,7 +20,10 @@ import type { Asset } from '@/lib/types';
 import { downloadCSV } from '@/lib/utils';
 
 export default function Watchlist() {
-  const { data: assets } = useSWR<Asset[]>('/api/assets?active_only=true', fetcher);
+  const { data: assets, error, isLoading } = useSWR<Asset[]>(
+    '/api/assets?active_only=true',
+    fetcher,
+  );
 
   const exportCsv = () => {
     if (!assets) return;
@@ -40,7 +44,13 @@ export default function Watchlist() {
     <div className="max-w-7xl mx-auto p-6 space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">观察池</h1>
-        <Button variant="outline" size="sm" onClick={exportCsv} className="ml-auto">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportCsv}
+          disabled={!assets || assets.length === 0}
+          className="ml-auto"
+        >
           <Download className="h-3.5 w-3.5 mr-1" /> 导出 CSV
         </Button>
       </div>
@@ -50,38 +60,50 @@ export default function Watchlist() {
           <CardDescription>spec § 2.2-2.3 默认观察池</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Market</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Sector</TableHead>
-                <TableHead className="text-right">Priority</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {assets?.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell className="font-mono">{a.symbol}</TableCell>
-                  <TableCell>{a.name}</TableCell>
-                  <TableCell>
-                    <Badge variant={a.market === 'CRYPTO' ? 'warning' : 'info'}>{a.market}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="muted">{a.asset_type}</Badge>
-                  </TableCell>
-                  <TableCell className="text-zinc-400">{a.sector ?? '—'}</TableCell>
-                  <TableCell className="text-right text-zinc-400">{a.priority}</TableCell>
+          {error ? (
+            <ErrorState error={error} />
+          ) : isLoading || !assets ? (
+            <LoadingState />
+          ) : assets.length === 0 ? (
+            <EmptyState
+              message="还没有 Asset"
+              hint={
+                <>
+                  <code>POST /api/assets</code> 创建。spec § 2.2 默认观察池有 20 个美股 + BTC + ETH。
+                </>
+              }
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Market</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Sector</TableHead>
+                  <TableHead className="text-right">Priority</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {(!assets || assets.length === 0) && (
-            <p className="text-zinc-500 p-6 text-sm">
-              还没有 Asset。<code>POST /api/assets</code> 创建。
-            </p>
+              </TableHeader>
+              <TableBody>
+                {assets.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-mono">{a.symbol}</TableCell>
+                    <TableCell>{a.name}</TableCell>
+                    <TableCell>
+                      <Badge variant={a.market === 'CRYPTO' ? 'warning' : 'info'}>
+                        {a.market}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="muted">{a.asset_type}</Badge>
+                    </TableCell>
+                    <TableCell className="text-zinc-400">{a.sector ?? '—'}</TableCell>
+                    <TableCell className="text-right text-zinc-400">{a.priority}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

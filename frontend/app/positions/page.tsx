@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import {
   Table,
   TableBody,
@@ -23,7 +24,7 @@ import type { Candle, TradeRow } from '@/lib/types';
 import { downloadCSV, fmt } from '@/lib/utils';
 
 export default function Positions() {
-  const { data: trades } = useSWR<TradeRow[]>('/api/trades?status=OPEN', fetcher, {
+  const { data: trades, error } = useSWR<TradeRow[]>('/api/trades?status=OPEN', fetcher, {
     refreshInterval: 30000,
   });
   const [selected, setSelected] = useState<TradeRow | null>(null);
@@ -74,52 +75,57 @@ export default function Positions() {
           <CardDescription>点击「查看」打开 K 线 + 标注</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead className="text-right">Entry</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">SL</TableHead>
-                <TableHead className="text-right">T1</TableHead>
-                <TableHead className="text-right">T2</TableHead>
-                <TableHead>Trail</TableHead>
-                <TableHead>Entry Time</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {trades?.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="font-mono">{t.symbol}</TableCell>
-                  <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
-                  <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
-                  <TableCell className="text-right font-mono">{fmt(t.quantity, 4)}</TableCell>
-                  <TableCell className="text-right font-mono">{fmt(t.stop_loss_current, 4)}</TableCell>
-                  <TableCell className="text-right font-mono">
-                    {t.target_1 ? fmt(t.target_1, 4) : '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {t.target_2 ? fmt(t.target_2, 4) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {t.trailing_stop_activated ? <Badge variant="success">trail</Badge> : '—'}
-                  </TableCell>
-                  <TableCell className="text-zinc-500 text-xs">
-                    {new Date(t.entry_time).toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" onClick={() => setSelected(t)}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
+          {error ? (
+            <ErrorState error={error} />
+          ) : !trades ? (
+            <LoadingState />
+          ) : trades.length === 0 ? (
+            <EmptyState message="没有 OPEN 持仓" hint="信号通过风控并成交后会出现在这里" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead className="text-right">Entry</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">SL</TableHead>
+                  <TableHead className="text-right">T1</TableHead>
+                  <TableHead className="text-right">T2</TableHead>
+                  <TableHead>Trail</TableHead>
+                  <TableHead>Entry Time</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {(!trades || trades.length === 0) && (
-            <p className="text-zinc-500 p-6 text-sm">没有 OPEN 持仓。</p>
+              </TableHeader>
+              <TableBody>
+                {trades.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="font-mono">{t.symbol}</TableCell>
+                    <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
+                    <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
+                    <TableCell className="text-right font-mono">{fmt(t.quantity, 4)}</TableCell>
+                    <TableCell className="text-right font-mono">{fmt(t.stop_loss_current, 4)}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {t.target_1 ? fmt(t.target_1, 4) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {t.target_2 ? fmt(t.target_2, 4) : '—'}
+                    </TableCell>
+                    <TableCell>
+                      {t.trailing_stop_activated ? <Badge variant="success">trail</Badge> : '—'}
+                    </TableCell>
+                    <TableCell className="text-zinc-500 text-xs">
+                      {new Date(t.entry_time).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" onClick={() => setSelected(t)}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
