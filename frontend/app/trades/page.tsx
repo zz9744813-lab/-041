@@ -8,143 +8,82 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetcher } from '@/lib/fetcher';
 import type { TradeRow } from '@/lib/types';
 import { cn, downloadCSV, fmt, fmtPct } from '@/lib/utils';
 
-export default function Trades() {
-  const { data: trades, error } = useSWR<TradeRow[]>(
-    '/api/trades?status=CLOSED&limit=200',
-    fetcher,
-    { refreshInterval: 60000 },
-  );
+const REASON_LABEL: Record<string, string> = {
+  STOP_LOSS: '止损', TAKE_PROFIT_1: '止盈(目标1)', TAKE_PROFIT_2: '止盈(目标2)',
+  TRAILING_STOP: '移动止损', AI_RISK_EXIT: 'AI 风控退出', MAX_HOLDING: '持仓超期', MANUAL: '手动平仓',
+};
 
-  function exportCsv() {
-    if (!trades) return;
-    downloadCSV(
-      `trades-${new Date().toISOString().slice(0, 10)}.csv`,
-      trades.map((t) => ({
-        id: t.id,
-        symbol: t.symbol,
-        model: t.model_name,
-        entry_time: t.entry_time,
-        entry_price: t.entry_price,
-        exit_time: t.exit_time ?? '',
-        exit_price: t.exit_price ?? '',
-        pnl_amount: t.pnl_amount ?? '',
-        pnl_pct: t.pnl_pct ?? '',
-        r_multiple: t.realized_r_multiple ?? '',
-        exit_reason: t.exit_reason ?? '',
-      })),
-    );
-  }
+const REASON_MAP = Object.fromEntries(Object.entries(REASON_LABEL).map(([k]) => [k, k]));
+
+export default function Trades() {
+  const { data: trades, error } = useSWR<TradeRow[]>('/api/trades?status=CLOSED&limit=200', fetcher, { refreshInterval: 60000 });
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">历史交易</h1>
-        <Button variant="outline" size="sm" onClick={exportCsv} className="ml-auto">
+        <Button variant="outline" size="sm" onClick={() => trades && downloadCSV(`trades-${new Date().toISOString().slice(0, 10)}.csv`, trades.map((t) => ({ 标的: t.symbol, 策略: t.model_name, 开仓时间: t.entry_time, 开仓价: t.entry_price, 平仓时间: t.exit_time ?? '', 平仓价: t.exit_price ?? '', 盈亏: t.pnl_amount ?? '', '盈亏%': t.pnl_pct ?? '', 'R 倍数': t.realized_r_multiple ?? '', 退出原因: (REASON_LABEL[t.exit_reason ?? ''] || t.exit_reason) || '' })))} disabled={!trades || trades.length === 0} className="ml-auto">
           <Download className="h-3.5 w-3.5 mr-1" /> 导出 CSV
         </Button>
       </div>
       <Card>
         <CardHeader>
           <CardTitle>已平仓交易</CardTitle>
-          <CardDescription>P&L / R Multiple / 退出原因</CardDescription>
+          <CardDescription>盈亏 / R 倍数 / 退出原因</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          {error ? (
-            <ErrorState error={error} />
-          ) : !trades ? (
-            <LoadingState />
-          ) : trades.length === 0 ? (
-            <EmptyState message="还没有已平仓交易" hint="持仓触发 SL/TP/MANUAL 后会出现在这里" />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Symbol</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead className="text-right">Entry</TableHead>
-                  <TableHead className="text-right">Exit</TableHead>
-                  <TableHead className="text-right">P&L</TableHead>
-                  <TableHead className="text-right">P&L %</TableHead>
-                  <TableHead className="text-right">R</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trades.map((t) => {
-                  const pnl = Number(t.pnl_amount ?? 0);
-                  const won = pnl > 0;
-                  return (
-                    <TableRow key={t.id}>
-                      <TableCell className="font-mono">{t.symbol}</TableCell>
-                      <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
-                      <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
-                      <TableCell className="text-right font-mono">
-                        {t.exit_price ? fmt(t.exit_price, 4) : '—'}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          'text-right font-mono',
-                          won ? 'text-green-400' : 'text-red-400',
-                        )}
-                      >
-                        ${fmt(t.pnl_amount, 2)}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          'text-right font-mono',
-                          won ? 'text-green-400' : 'text-red-400',
-                        )}
-                      >
-                        {fmtPct(t.pnl_pct)}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          'text-right font-mono',
-                          won ? 'text-green-400' : 'text-red-400',
-                        )}
-                      >
-                        {t.realized_r_multiple ? `${fmt(t.realized_r_multiple, 2)}R` : '—'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={exitReasonVariant(t.exit_reason)}>
-                          {t.exit_reason ?? '—'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/reviews?trade_id=${t.id}`}>
-                          <Button variant="ghost" size="sm">
-                            <FileText className="h-3.5 w-3.5 mr-1" /> 复盘
-                          </Button>
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
+          {error ? <ErrorState error={error} />
+            : !trades ? <LoadingState />
+            : trades.length === 0
+            ? <EmptyState message="暂无已平仓交易" hint="持仓触发止损/止盈后会出现在这里" />
+            : <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>标的</TableHead>
+                    <TableHead>策略</TableHead>
+                    <TableHead className="text-right">开仓</TableHead>
+                    <TableHead className="text-right">平仓</TableHead>
+                    <TableHead className="text-right">盈亏</TableHead>
+                    <TableHead className="text-right">盈亏%</TableHead>
+                    <TableHead className="text-right">R 倍数</TableHead>
+                    <TableHead>退出原因</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {trades.map((t) => {
+                    const pnl = Number(t.pnl_amount ?? 0); const won = pnl > 0;
+                    return (
+                      <TableRow key={t.id}>
+                        <TableCell className="font-mono">{t.symbol}</TableCell>
+                        <TableCell className="text-zinc-400 text-xs">{t.model_name}</TableCell>
+                        <TableCell className="text-right font-mono">{fmt(t.entry_price, 4)}</TableCell>
+                        <TableCell className="text-right font-mono">{t.exit_price ? fmt(t.exit_price, 4) : '—'}</TableCell>
+                        <TableCell className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}>${fmt(t.pnl_amount, 2)}</TableCell>
+                        <TableCell className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}>{fmtPct(t.pnl_pct)}</TableCell>
+                        <TableCell className={cn('text-right font-mono', won ? 'text-green-400' : 'text-red-400')}>{t.realized_r_multiple ? `${fmt(t.realized_r_multiple, 2)}R` : '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant={exitVariant(t.exit_reason)}>{(REASON_LABEL[t.exit_reason ?? ''] || t.exit_reason) || '—'}</Badge>
+                        </TableCell>
+                        <TableCell><Link href={`/reviews?trade_id=${t.id}`}><Button variant="ghost" size="sm"><FileText className="h-3.5 w-3.5 mr-1" />复盘</Button></Link></TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+          }
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function exitReasonVariant(
-  reason: string | null,
-): 'success' | 'warning' | 'danger' | 'info' | 'muted' {
+function exitVariant(reason: string | null): 'success' | 'warning' | 'danger' | 'info' | 'muted' {
   if (!reason) return 'muted';
   if (reason.startsWith('TAKE_PROFIT')) return 'success';
   if (reason === 'TRAILING_STOP') return 'info';
