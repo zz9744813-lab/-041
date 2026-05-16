@@ -1,36 +1,86 @@
 'use client';
 
+import { Download } from 'lucide-react';
 import useSWR from 'swr';
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { fetcher } from '@/lib/fetcher';
+import type {
+  DataFreshnessRow,
+  LlmStatRow,
+  RejectReasonRow,
+  SystemHealthRow,
+} from '@/lib/types';
+import { cn, downloadCSV, fmt } from '@/lib/utils';
 
 export default function System() {
-  const { data: health } = useSWR<any[]>('/api/system/health', fetcher, { refreshInterval: 30000 });
-  const { data: freshness } = useSWR<any[]>('/api/system/data-freshness', fetcher, {
+  const { data: health } = useSWR<SystemHealthRow[]>('/api/system/health', fetcher, {
+    refreshInterval: 30000,
+  });
+  const { data: freshness } = useSWR<DataFreshnessRow[]>(
+    '/api/system/data-freshness',
+    fetcher,
+    { refreshInterval: 60000 },
+  );
+  const { data: llm } = useSWR<LlmStatRow[]>('/api/system/llm-stats', fetcher, {
     refreshInterval: 60000,
   });
-  const { data: llm } = useSWR<any[]>('/api/system/llm-stats', fetcher, { refreshInterval: 60000 });
-  const { data: rejects } = useSWR<any[]>('/api/system/reject-reasons', fetcher);
+  const { data: rejects } = useSWR<RejectReasonRow[]>('/api/system/reject-reasons', fetcher);
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold">系统健康度</h1>
 
-      <section className="bg-zinc-900 rounded border border-zinc-800 p-4">
-        <h2 className="font-semibold mb-2">最近任务运行</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-zinc-500">
-                <th className="text-left">job</th>
-                <th className="text-left">started</th>
-                <th className="text-left">status</th>
-                <th className="text-left">duration</th>
-                <th className="text-left">error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {health?.slice(0, 30).map((h: any) => {
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>最近任务运行</CardTitle>
+              <CardDescription>每个 job 的 SystemHealth 记录</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCSV(
+                  `system-health-${new Date().toISOString().slice(0, 10)}.csv`,
+                  (health ?? []).map((h) => ({
+                    job: h.job_name,
+                    status: h.status,
+                    started: h.started_at,
+                    finished: h.finished_at ?? '',
+                    error: h.error_message ?? '',
+                  })),
+                )
+              }
+            >
+              <Download className="h-3.5 w-3.5 mr-1" /> 导出
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Job</TableHead>
+                <TableHead>Started</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Duration</TableHead>
+                <TableHead>Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {health?.slice(0, 30).map((h) => {
                 const dur =
                   h.started_at && h.finished_at
                     ? `${(
@@ -38,106 +88,136 @@ export default function System() {
                         1000
                       ).toFixed(1)}s`
                     : '—';
-                const cls =
-                  h.status === 'SUCCESS'
-                    ? 'text-green-400'
-                    : h.status === 'FAILED'
-                      ? 'text-red-400'
-                      : 'text-yellow-400';
                 return (
-                  <tr key={h.id} className="border-t border-zinc-800">
-                    <td className="py-1 font-mono">{h.job_name}</td>
-                    <td className="py-1 text-zinc-500 text-xs">
-                      {new Date(h.started_at).toLocaleTimeString()}
-                    </td>
-                    <td className={`py-1 font-mono ${cls}`}>{h.status}</td>
-                    <td className="py-1 text-zinc-500">{dur}</td>
-                    <td className="py-1 text-red-400 text-xs truncate max-w-md">
+                  <TableRow key={h.id}>
+                    <TableCell className="font-mono">{h.job_name}</TableCell>
+                    <TableCell className="text-zinc-500 text-xs">
+                      {new Date(h.started_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          h.status === 'SUCCESS'
+                            ? 'success'
+                            : h.status === 'FAILED'
+                              ? 'danger'
+                              : 'warning'
+                        }
+                      >
+                        {h.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-zinc-400">{dur}</TableCell>
+                    <TableCell className="text-red-400 text-xs max-w-md truncate">
                       {h.error_message ?? ''}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
-      <section className="bg-zinc-900 rounded border border-zinc-800 p-4">
-        <h2 className="font-semibold mb-2">数据新鲜度</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-zinc-500">
-                <th className="text-left">symbol</th>
-                <th className="text-left">tf</th>
-                <th className="text-left">last bar</th>
-                <th className="text-right">skew (min)</th>
-                <th className="text-left">status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {freshness?.map((f: any, i: number) => (
-                <tr key={i} className="border-t border-zinc-800">
-                  <td className="py-1 font-mono">{f.symbol}</td>
-                  <td className="py-1 text-zinc-400">{f.timeframe}</td>
-                  <td className="py-1 text-zinc-500 text-xs">{f.actual ?? '—'}</td>
-                  <td className="py-1 text-right">
+      <Card>
+        <CardHeader>
+          <CardTitle>数据新鲜度</CardTitle>
+          <CardDescription>每个 symbol/timeframe 的最新 final bar</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead>TF</TableHead>
+                <TableHead>Last bar</TableHead>
+                <TableHead className="text-right">Skew (min)</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {freshness?.map((f, i) => (
+                <TableRow key={i}>
+                  <TableCell className="font-mono">{f.symbol}</TableCell>
+                  <TableCell className="text-zinc-400">{f.timeframe}</TableCell>
+                  <TableCell className="text-zinc-500 text-xs">{f.actual ?? '—'}</TableCell>
+                  <TableCell className="text-right">
                     {f.skew_minutes !== null ? f.skew_minutes.toFixed(0) : '—'}
-                  </td>
-                  <td
-                    className={`py-1 font-mono ${
-                      f.status === 'STALE' ? 'text-red-400' : 'text-green-400'
-                    }`}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={f.status === 'STALE' ? 'danger' : 'success'}>{f.status}</Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>LLM 调用统计 (近 7 天)</CardTitle>
+            <CardDescription>cost / cache hit / failure</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Day</TableHead>
+                  <TableHead>Purpose</TableHead>
+                  <TableHead className="text-right">Calls</TableHead>
+                  <TableHead className="text-right">Cached</TableHead>
+                  <TableHead className="text-right">Cost $</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {llm?.map((l, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-zinc-400 text-xs">{l.day}</TableCell>
+                    <TableCell className="text-zinc-400">{l.purpose}</TableCell>
+                    <TableCell className="text-right font-mono">{l.total}</TableCell>
+                    <TableCell className="text-right font-mono">{l.cached_hits}</TableCell>
+                    <TableCell className="text-right font-mono">${fmt(l.cost_usd, 4)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {(!llm || llm.length === 0) && (
+              <p className="text-zinc-500 p-4 text-sm">暂无 LLM 调用</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>风控拒绝 Top 原因</CardTitle>
+            <CardDescription>近 7 天 reject_reason 直方图</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="text-sm space-y-1.5">
+              {rejects?.map((r, i) => (
+                <li key={i} className="flex justify-between items-center">
+                  <span
+                    className={cn(
+                      'text-zinc-400 text-xs truncate flex-1',
+                      r.n > 5 && 'text-yellow-400',
+                    )}
                   >
-                    {f.status}
-                  </td>
-                </tr>
+                    {r.reason}
+                  </span>
+                  <Badge variant={r.n > 10 ? 'danger' : r.n > 5 ? 'warning' : 'muted'}>
+                    {r.n}
+                  </Badge>
+                </li>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-          <h2 className="font-semibold mb-2">LLM 调用统计 (近 7 天)</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-zinc-500">
-                <th className="text-left">day</th>
-                <th className="text-left">purpose</th>
-                <th className="text-right">calls</th>
-                <th className="text-right">cached</th>
-                <th className="text-right">$</th>
-              </tr>
-            </thead>
-            <tbody>
-              {llm?.map((l: any, i: number) => (
-                <tr key={i} className="border-t border-zinc-800">
-                  <td className="py-1 text-zinc-400">{l.day}</td>
-                  <td className="py-1 text-zinc-400">{l.purpose}</td>
-                  <td className="py-1 text-right">{l.total}</td>
-                  <td className="py-1 text-right">{l.cached_hits}</td>
-                  <td className="py-1 text-right font-mono">{Number(l.cost_usd).toFixed(4)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-          <h2 className="font-semibold mb-2">风控拒绝 Top 原因</h2>
-          <ul className="text-sm space-y-1">
-            {rejects?.map((r: any, i: number) => (
-              <li key={i} className="flex justify-between">
-                <span className="text-zinc-400 text-xs truncate">{r.reason}</span>
-                <span className="font-mono text-red-400">{r.n}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
+              {(!rejects || rejects.length === 0) && (
+                <p className="text-zinc-500 text-xs">暂无拒绝</p>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
