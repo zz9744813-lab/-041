@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+venv/
+.venv/
+env/
+ENV/
+
+# Node / Next
+node_modules/
+.next/
+out/
+.npm
+.eslintcache
+*.tsbuildinfo
+next-env.d.ts
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Docker volumes (project-local data, keeps off C drive)
+.docker-data/
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+*.tsbuildinfo
