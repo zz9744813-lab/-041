@@ -1,5 +1,4 @@
 """Market data endpoints."""
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -8,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Candle, IndicatorSnapshot, MarketRegime
+from app.schemas import CandleOut, IndicatorSnapshotOut
 
 router = APIRouter()
 
 
-@router.get("/candles")
+@router.get("/candles", response_model=list[CandleOut])
 def list_candles(
     symbol: str,
     timeframe: str,
@@ -28,26 +28,12 @@ def list_candles(
     )
     if only_final:
         stmt = stmt.where(Candle.is_final.is_(True))
-    rows = db.scalars(stmt).all()
-    rows.reverse()  # ascending order for charts
-    return [
-        {
-            "symbol": r.symbol,
-            "timeframe": r.timeframe,
-            "timestamp": r.timestamp.isoformat(),
-            "open": str(r.open),
-            "high": str(r.high),
-            "low": str(r.low),
-            "close": str(r.close),
-            "volume": str(r.volume),
-            "adjustment": r.adjustment,
-            "is_final": r.is_final,
-        }
-        for r in rows
-    ]
+    rows = list(db.scalars(stmt).all())
+    rows.reverse()
+    return rows
 
 
-@router.get("/indicators")
+@router.get("/indicators", response_model=list[IndicatorSnapshotOut])
 def list_indicators(
     symbol: str,
     timeframe: str,
@@ -87,7 +73,7 @@ def regime_history(days: int = 90, db: Session = Depends(get_db)):
         .order_by(desc(MarketRegime.timestamp))
         .limit(days)
     )
-    rows = db.scalars(stmt).all()
+    rows = list(db.scalars(stmt).all())
     rows.reverse()
     return [
         {
@@ -96,7 +82,3 @@ def regime_history(days: int = 90, db: Session = Depends(get_db)):
         }
         for r in rows
     ]
-
-
-def _ts_to_iso(ts: datetime | None) -> str | None:
-    return ts.isoformat() if ts else None

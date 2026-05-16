@@ -5,16 +5,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import PortfolioSnapshot
+from app.schemas import PortfolioSnapshotOut
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=PortfolioSnapshotOut | None)
 def current_snapshot(db: Session = Depends(get_db)):
     stmt = select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.timestamp)).limit(1)
     snap = db.scalars(stmt).first()
-    if not snap:
-        return None
     return snap
 
 
@@ -26,6 +25,7 @@ def equity_curve(days: int = 180, db: Session = Depends(get_db)):
         .limit(days)
     )
     rows = db.scalars(stmt).all()
+    rows = list(rows)
     rows.reverse()
     return [
         {"timestamp": r.timestamp.isoformat(), "equity": str(r.equity), "cash": str(r.cash)}
@@ -40,7 +40,7 @@ def drawdown_series(days: int = 180, db: Session = Depends(get_db)):
         .order_by(desc(PortfolioSnapshot.timestamp))
         .limit(days)
     )
-    rows = db.scalars(stmt).all()
+    rows = list(db.scalars(stmt).all())
     rows.reverse()
     return [
         {"timestamp": r.timestamp.isoformat(), "drawdown_pct": str(r.max_drawdown_pct)}
