@@ -50,12 +50,47 @@ V1 完整闭环已搭建。Step 1-12 全部完成。
 
 - `/` - Dashboard(账户净值、回撤、最近信号、市场环境)
 - `/watchlist` - 观察池
-- `/signals` - 信号(状态过滤 + 触发生成)
+- `/signals` - 信号(状态过滤 + 触发生成,SSE 实时进度)
 - `/positions` - 持仓
 - `/trades` - 历史交易(P&L / R Multiple)
 - `/models` - 策略模型 + 30 天表现统计
 - `/reviews` - 复盘(LLM/规则两版)
+- `/llm` - **LLM 调用日志** (prompt / 输入 / 思考 / 原始响应,新增)
+- `/llm/decision` - **LLM 实时调试** (单标的流式跑决策,新增)
 - `/system` - 系统健康度(任务运行 / 数据新鲜度 / LLM 成本 / 风控拒绝 Top)
+
+## V2.1 性能 / LLM 透明度改造
+
+本分支(`feat/perf-llm-visibility`)的核心改进:
+
+- **卡顿修复**
+  - 全局 `<SWRConfig>` (dedupe 5s, 不在 focus 时刷新, keepPreviousData 防闪烁)
+  - 各页面 polling 30s → 60-120s
+  - `SignalOut` 拆为 `SignalListItem` (轻) + `SignalDetail` (全),列表 payload 缩 80%
+  - 长列表服务端分页 `limit=50` 默认,加上下页按钮
+  - `POST /api/signals/run` 改 `BackgroundTasks` + 立即返回 `job_id`,不再阻塞 UI
+  - `ai_composite.combine` N+1 修复(一次 IN 查询替代 9 次)
+  - `/api/system/data-freshness` 一次 GROUP BY 查询替代 22×3=66 次
+  - `CandleChart` `React.memo` + 父组件 `useMemo` 记忆 markers/priceLines
+
+- **LLM 思考可见**
+  - `LlmCallLog` 新增 `system_prompt` / `user_input` / `raw_response_text` / `thinking` / `attempts` 列
+  - `Signal` / `Review` 新增 `llm_call_log_id` FK,可从信号详情直接跳到完整调用记录
+  - `llm_client` 默认对兼容模型开启 Anthropic extended thinking,捕获 `ThinkingBlock`
+  - 新增 SSE 端点:
+    - `GET /api/llm/stream/run-signals/{job_id}` - 后台运行的实时进度 + 当前资产 thinking
+    - `GET /api/llm/stream/decision/{symbol}` - 单标的实时跑评分 + LLM 决策(不开仓)
+  - 新增 REST 端点:
+    - `GET /api/system/llm-logs` - 列表
+    - `GET /api/system/llm-logs/{id}` - 详情(含 prompt / 输入 / 思考 / 原始响应)
+  - 前端新增 `/llm` 日志页 + `/llm/[id]` 详情页 + `/llm/decision` 实时调试页
+
+应用迁移:
+
+```bash
+cd backend
+alembic upgrade head     # 应用 20260518_llm_visibility 迁移
+```
 
 ## 快速开始
 

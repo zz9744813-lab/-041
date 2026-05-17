@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.api import (
     routes_assets,
+    routes_llm,
     routes_market,
     routes_models,
     routes_portfolio,
@@ -53,6 +54,7 @@ app.include_router(routes_reviews.router, prefix="/api/reviews", tags=["reviews"
 app.include_router(routes_reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(routes_models.router, prefix="/api/models", tags=["models"])
 app.include_router(routes_system.router, prefix="/api/system", tags=["system"])
+app.include_router(routes_llm.router, prefix="/api/llm", tags=["llm"])
 
 
 @app.get("/health")

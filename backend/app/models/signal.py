@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -48,6 +48,11 @@ class Signal(Base):
     llm_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     llm_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # FK to the LlmCallLog row that produced this signal. Nullable because
+    # rule-based signals never call the LLM.
+    llm_call_log_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_call_logs.id"), nullable=True, index=True
+    )
 
     # ---- Lifecycle (V2 § 8.4) ----
     status: Mapped[str] = mapped_column(String(32), default="NEW", nullable=False)

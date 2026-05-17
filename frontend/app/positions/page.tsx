@@ -1,8 +1,7 @@
 'use client';
 
 import { Download, Eye, X } from 'lucide-react';
-import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { CandleChart, type ChartMarker, type PriceLine } from '@/components/charts/candle-chart';
@@ -17,7 +16,7 @@ import type { Candle, TradeRow } from '@/lib/types';
 import { downloadCSV, fmt } from '@/lib/utils';
 
 export default function Positions() {
-  const { data: trades, error } = useSWR<TradeRow[]>('/api/trades?status=OPEN', fetcher, { refreshInterval: 30000 });
+  const { data: trades, error } = useSWR<TradeRow[]>('/api/trades?status=OPEN', fetcher, { refreshInterval: 60000 });
   const [selected, setSelected] = useState<TradeRow | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -86,10 +85,18 @@ export default function Positions() {
 
 function PositionDetail({ trade, onClose, busy }: { trade: TradeRow; onClose: () => void; busy: boolean }) {
   const { data: candles } = useSWR<Candle[]>(`/api/market/candles?symbol=${trade.symbol}&timeframe=1h&limit=200`, fetcher);
-  const markers: ChartMarker[] = [{ time: trade.entry_time, position: 'belowBar', color: '#3b82f6', shape: 'arrowUp', text: `开仓 ${fmt(trade.entry_price, 2)}` }];
-  const priceLines: PriceLine[] = [{ price: Number(trade.stop_loss_current), color: '#ef4444', title: '止损', style: 'dashed' }];
-  if (trade.target_1) priceLines.push({ price: Number(trade.target_1), color: '#22c55e', title: '目标1', style: 'dashed' });
-  if (trade.target_2) priceLines.push({ price: Number(trade.target_2), color: '#22c55e', title: '目标2', style: 'dotted' });
+  // Memoise so referential identity is stable across re-renders -> CandleChart's
+  // useEffect([markers]) won't re-fire on every parent SWR poll.
+  const markers = useMemo<ChartMarker[]>(
+    () => [{ time: trade.entry_time, position: 'belowBar', color: '#3b82f6', shape: 'arrowUp', text: `开仓 ${fmt(trade.entry_price, 2)}` }],
+    [trade.entry_time, trade.entry_price],
+  );
+  const priceLines = useMemo<PriceLine[]>(() => {
+    const arr: PriceLine[] = [{ price: Number(trade.stop_loss_current), color: '#ef4444', title: '止损', style: 'dashed' }];
+    if (trade.target_1) arr.push({ price: Number(trade.target_1), color: '#22c55e', title: '目标1', style: 'dashed' });
+    if (trade.target_2) arr.push({ price: Number(trade.target_2), color: '#22c55e', title: '目标2', style: 'dotted' });
+    return arr;
+  }, [trade.stop_loss_current, trade.target_1, trade.target_2]);
   return (
     <>
       <DialogHeader>

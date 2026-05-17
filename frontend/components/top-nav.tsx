@@ -3,6 +3,7 @@
 import {
   Activity,
   BarChart3,
+  Brain,
   Briefcase,
   History,
   Home,
@@ -24,6 +25,7 @@ const NAV = [
   { href: '/trades', label: '交易记录', icon: History },
   { href: '/models', label: '策略模型', icon: BarChart3 },
   { href: '/reviews', label: '复盘', icon: ScrollText },
+  { href: '/llm', label: 'LLM 日志', icon: Brain },
   { href: '/system', label: '系统', icon: Settings },
 ];
 

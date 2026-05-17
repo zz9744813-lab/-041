@@ -26,6 +26,10 @@ class Review(Base):
     llm_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     llm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     llm_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    # FK to LlmCallLog (nullable: rule-based reviews don't call the LLM).
+    llm_call_log_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_call_logs.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

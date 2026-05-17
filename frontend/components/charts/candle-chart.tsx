@@ -9,7 +9,7 @@ import {
   type SeriesMarker,
   type Time,
 } from 'lightweight-charts';
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 
 import type { Candle } from '@/lib/types';
 
@@ -36,10 +36,14 @@ interface Props {
   height?: number;
 }
 
-export function CandleChart({ candles, markers = [], priceLines = [], height = 360 }: Props) {
+function CandleChartImpl({ candles, markers = [], priceLines = [], height = 360 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  // Track whether we've already done the initial fitContent so we don't
+  // jam the timescale back to "show all" on every candle update (which
+  // wrecks the user's scroll/zoom).
+  const fittedRef = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -73,6 +77,7 @@ export function CandleChart({ candles, markers = [], priceLines = [], height = 3
     });
     chartRef.current = chart;
     seriesRef.current = series;
+    fittedRef.current = false;
 
     const onResize = () => {
       if (containerRef.current && chartRef.current) {
@@ -86,6 +91,7 @@ export function CandleChart({ candles, markers = [], priceLines = [], height = 3
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      fittedRef.current = false;
     };
   }, [height]);
 
@@ -99,7 +105,12 @@ export function CandleChart({ candles, markers = [], priceLines = [], height = 3
       close: Number(c.close),
     }));
     seriesRef.current.setData(data);
-    if (data.length > 0) chartRef.current?.timeScale().fitContent();
+    // Only fit once on the first non-empty load; later updates respect the
+    // user's current scroll/zoom.
+    if (data.length > 0 && !fittedRef.current) {
+      chartRef.current?.timeScale().fitContent();
+      fittedRef.current = true;
+    }
   }, [candles]);
 
   useEffect(() => {
@@ -135,3 +146,10 @@ export function CandleChart({ candles, markers = [], priceLines = [], height = 3
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }
+
+/**
+ * Memoised so that parent re-renders (which happen every 30-60s due to SWR
+ * polling) don't re-create the chart's internal state. Parents must pass
+ * stable references for `candles` / `markers` / `priceLines` (use useMemo).
+ */
+export const CandleChart = memo(CandleChartImpl);

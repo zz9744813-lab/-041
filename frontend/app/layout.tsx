@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 
+import { SwrProvider } from '@/components/swr-provider';
 import { TopNav } from '@/components/top-nav';
 
 export const metadata: Metadata = {
@@ -12,8 +13,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body className="min-h-screen flex flex-col">
-        <TopNav />
-        <main className="flex-1">{children}</main>
+        <SwrProvider>
+          <TopNav />
+          <main className="flex-1">{children}</main>
+        </SwrProvider>
       </body>
     </html>
   );

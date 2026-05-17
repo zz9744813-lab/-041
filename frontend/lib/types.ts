@@ -67,12 +67,7 @@ export interface SignalRow {
   position_size_pct: string | null;
   expected_holding_days_min: number | null;
   expected_holding_days_max: number | null;
-  signal_decay_hours: number | null;
   model_name: string;
-  reason: string;
-  risk_note: string;
-  invalid_condition: string;
-  follow_up_rule: string | null;
   status: string;
   reject_reason: string | null;
   valid_until: string;
@@ -80,6 +75,23 @@ export interface SignalRow {
   llm_provider: string | null;
   llm_model: string | null;
   llm_cost_usd: string | null;
+}
+
+/** Full signal payload (returned by GET /api/signals/{id}). */
+export interface SignalDetail extends SignalRow {
+  schema_version: string;
+  signal_decay_hours: number | null;
+  reason: string;
+  risk_note: string;
+  invalid_condition: string;
+  follow_up_rule: string | null;
+  input_hash: string;
+  llm_input_tokens: number | null;
+  llm_output_tokens: number | null;
+  prompt_version: string | null;
+  llm_call_log_id: number | null;
+  generation_batch_id: string;
+  updated_at: string;
 }
 
 export interface TradeRow {
@@ -121,6 +133,7 @@ export interface ReviewRow {
   llm_provider: string | null;
   llm_model: string | null;
   llm_cost_usd: string | null;
+  llm_call_log_id: number | null;
   created_at: string;
 }
 
@@ -193,4 +206,42 @@ export interface EquityCurvePoint {
 export interface DrawdownPoint {
   timestamp: string;
   drawdown_pct: string;
+}
+
+export interface LlmCallLogListItem {
+  id: number;
+  purpose: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  cached: boolean;
+  status: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface LlmCallLogDetail extends LlmCallLogListItem {
+  input_hash: string;
+  attempts: number | null;
+  system_prompt: string | null;
+  user_input: unknown | null;
+  raw_response_text: string | null;
+  thinking: string | null;
+  response_payload: unknown | null;
+}
+
+export interface RunSignalsJobStatus {
+  job_id: string;
+  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  started_at: number | null;
+  finished_at: number | null;
+  asset_total: number;
+  asset_done: number;
+  current_symbol: string | null;
+  error: string | null;
+  result: unknown | null;
 }
