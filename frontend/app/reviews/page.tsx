@@ -42,18 +42,26 @@ export default function Reviews() {
 function FocusedReview({ review }: { review: ReviewRow }) {
   const { data: trade } = useSWR<TradeRow>(`/api/trades/${review.trade_id}`, fetcher);
   const { data: candles } = useSWR<Candle[]>(trade ? `/api/market/candles?symbol=${trade.symbol}&timeframe=1h&limit=300` : null, fetcher);
+  const markers = useMemo<ChartMarker[]>(() => {
+    if (!trade) return [];
+    const arr: ChartMarker[] = [
+      { time: trade.entry_time, position: 'belowBar', color: '#3b82f6', shape: 'arrowUp', text: `开仓 ${fmt(trade.entry_price, 2)}` },
+    ];
+    if (trade.exit_time && trade.exit_price) {
+      const won = Number(trade.pnl_amount ?? 0) > 0;
+      arr.push({ time: trade.exit_time, position: 'aboveBar', color: won ? '#22c55e' : '#ef4444', shape: 'arrowDown', text: `平仓 ${fmt(trade.exit_price, 2)} (${(REASON_LABEL[trade.exit_reason ?? ''] || trade.exit_reason) ?? ''})` });
+    }
+    return arr;
+  }, [trade]);
+  const priceLines = useMemo<PriceLine[]>(() => {
+    if (!trade) return [];
+    const arr: PriceLine[] = [{ price: Number(trade.stop_loss_initial), color: '#ef4444', title: '初始止损', style: 'dashed' }];
+    if (Number(trade.stop_loss_current) !== Number(trade.stop_loss_initial)) arr.push({ price: Number(trade.stop_loss_current), color: '#f97316', title: '当前止损', style: 'dashed' });
+    if (trade.target_1) arr.push({ price: Number(trade.target_1), color: '#22c55e', title: 'TP1', style: 'dashed' });
+    if (trade.target_2) arr.push({ price: Number(trade.target_2), color: '#22c55e', title: 'TP2', style: 'dotted' });
+    return arr;
+  }, [trade]);
   if (!trade) return <LoadingState />;
-  const markers: ChartMarker[] = [
-    { time: trade.entry_time, position: 'belowBar', color: '#3b82f6', shape: 'arrowUp', text: `开仓 ${fmt(trade.entry_price, 2)}` },
-  ];
-  if (trade.exit_time && trade.exit_price) {
-    const won = Number(trade.pnl_amount ?? 0) > 0;
-    markers.push({ time: trade.exit_time, position: 'aboveBar', color: won ? '#22c55e' : '#ef4444', shape: 'arrowDown', text: `平仓 ${fmt(trade.exit_price, 2)} (${(REASON_LABEL[trade.exit_reason ?? ''] || trade.exit_reason) ?? ''})` });
-  }
-  const priceLines: PriceLine[] = [{ price: Number(trade.stop_loss_initial), color: '#ef4444', title: '初始止损', style: 'dashed' }];
-  if (Number(trade.stop_loss_current) !== Number(trade.stop_loss_initial)) priceLines.push({ price: Number(trade.stop_loss_current), color: '#f97316', title: '当前止损', style: 'dashed' });
-  if (trade.target_1) priceLines.push({ price: Number(trade.target_1), color: '#22c55e', title: 'TP1', style: 'dashed' });
-  if (trade.target_2) priceLines.push({ price: Number(trade.target_2), color: '#22c55e', title: 'TP2', style: 'dotted' });
   const won = Number(trade.pnl_amount ?? 0) > 0;
 
   return (
@@ -89,6 +97,11 @@ function FocusedReview({ review }: { review: ReviewRow }) {
         )}
         {review.model_adjustment_suggestion && (
           <div><div className="text-xs font-semibold text-blue-400 mb-1">模型调整建议</div><p className="text-xs text-zinc-300">{review.model_adjustment_suggestion}</p></div>
+        )}
+        {review.llm_call_log_id != null && (
+          <div className="pt-2 border-t border-zinc-800">
+            <a href={`/llm/${review.llm_call_log_id}`} className="text-xs text-blue-400 hover:underline">查看完整 LLM 调用 (prompt / 输入 / 思考 / 原始响应) →</a>
+          </div>
         )}
       </CardContent>
     </Card>

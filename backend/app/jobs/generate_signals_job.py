@@ -14,6 +14,7 @@ Per spec § 20.1:
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Callable
 
 from loguru import logger
 from sqlalchemy import select
@@ -71,6 +72,7 @@ def _persist_signal(
     batch_id: str,
     llm_provider: str | None = None,
     llm_model: str | None = None,
+    llm_call_log_id: int | None = None,
     now: datetime | None = None,
 ) -> Signal:
     now = now or utc_now()
@@ -108,6 +110,7 @@ def _persist_signal(
         input_hash=input_hash,
         llm_provider=llm_provider,
         llm_model=llm_model,
+        llm_call_log_id=llm_call_log_id,
         prompt_version=settings.prompt_version,
         status=SignalStatus.NEW.value,
         valid_until=valid_until,
@@ -183,6 +186,7 @@ def _process_one_asset(
     source = "rule"
     llm_provider = None
     llm_model = None
+    llm_call_log_id: int | None = None
 
     if settings.enable_llm_decision:
         portfolio_ctx = {
@@ -191,7 +195,7 @@ def _process_one_asset(
                 for p in risk_service.current_portfolio_state(db, now).open_positions
             ),
         }
-        plan_llm, src = decision_service.generate_signal_plan_llm(
+        plan_llm, src, log_id = decision_service.generate_signal_plan_llm(
             db,
             best,
             asset.market,
@@ -208,6 +212,7 @@ def _process_one_asset(
             source = src
             llm_provider = settings.llm_provider
             llm_model = settings.decision_model
+            llm_call_log_id = log_id
 
     if plan is None:
         plan = decision_service.generate_signal_plan_rule_based(
@@ -223,7 +228,8 @@ def _process_one_asset(
 
     sig = _persist_signal(
         db, plan, best.model_name, input_hash, batch_id,
-        llm_provider=llm_provider, llm_model=llm_model, now=now,
+        llm_provider=llm_provider, llm_model=llm_model,
+        llm_call_log_id=llm_call_log_id, now=now,
     )
 
     # Run risk
@@ -261,8 +267,36 @@ def _process_one_asset(
 
 @with_health_record("generate_signals")
 def run(now: datetime | None = None) -> dict:
+    return run_streaming(now=now)
+
+
+def run_streaming(
+    now: datetime | None = None,
+    on_event: Callable[[dict], None] | None = None,
+) -> dict:
+    """Same pipeline as :func:`run` but emits per-asset progress events.
+
+    `on_event` receives dicts like:
+        {"type": "asset_total", "total": 22}
+        {"type": "asset_start", "symbol": "AAPL"}
+        {"type": "asset_done", "symbol": "AAPL", "result": {...}}
+        {"type": "asset_error", "symbol": "AAPL", "error": "..."}
+
+    It is invoked synchronously in the worker thread so the caller can write
+    the events into a queue / SSE stream without coupling this module to any
+    web framework.
+    """
     now = now or utc_now()
     db = SessionLocal()
+
+    def _emit(event: dict) -> None:
+        if on_event is None:
+            return
+        try:
+            on_event(event)
+        except Exception:
+            logger.exception("on_event callback raised")
+
     try:
         # Re-filter pending signals before any new ones
         rf = risk_service.re_filter_pending(db, now)
@@ -273,13 +307,18 @@ def run(now: datetime | None = None) -> dict:
         batch_id = str(uuid.uuid4())
         results = []
         assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
+        _emit({"type": "asset_total", "total": len(assets), "batch_id": batch_id})
         for asset in assets:
+            _emit({"type": "asset_start", "symbol": asset.symbol})
             try:
                 r = _process_one_asset(db, asset, regime, batch_id, now)
                 results.append(r)
+                _emit({"type": "asset_done", "symbol": asset.symbol, "result": r})
             except Exception as e:
                 logger.exception("signal gen failed for {}", asset.symbol)
-                results.append({"symbol": asset.symbol, "error": str(e)})
+                err = {"symbol": asset.symbol, "error": str(e)}
+                results.append(err)
+                _emit({"type": "asset_error", "symbol": asset.symbol, "error": str(e)})
         return {
             "batch_id": batch_id,
             "regime": regime.regime if regime else None,

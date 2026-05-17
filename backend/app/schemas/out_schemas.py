@@ -47,6 +47,40 @@ class IndicatorSnapshotOut(_Base):
     resistance_level: Decimal | None = None
 
 
+class SignalListItem(_Base):
+    """Lightweight payload for table views.
+
+    Excludes the multi-KB free-text fields (`reason`, `risk_note`,
+    `invalid_condition`, `follow_up_rule`) which would otherwise pad each row
+    to 10-20 KB. Detail page (/api/signals/{id}) returns the full SignalOut.
+    """
+
+    id: int
+    symbol: str
+    market: str
+    direction: str
+    signal_type: str
+    current_price: Decimal
+    entry_low: Decimal | None = None
+    entry_high: Decimal | None = None
+    stop_loss: Decimal | None = None
+    target_1: Decimal | None = None
+    target_2: Decimal | None = None
+    confidence_score: int
+    risk_reward_ratio: Decimal | None = None
+    position_size_pct: Decimal | None = None
+    expected_holding_days_min: int | None = None
+    expected_holding_days_max: int | None = None
+    model_name: str
+    status: str
+    reject_reason: str | None = None
+    valid_until: datetime
+    created_at: datetime
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    llm_cost_usd: Decimal | None = None
+
+
 class SignalOut(_Base):
     id: int
     symbol: str
@@ -79,6 +113,7 @@ class SignalOut(_Base):
     llm_output_tokens: int | None = None
     llm_cost_usd: Decimal | None = None
     prompt_version: str | None = None
+    llm_call_log_id: int | None = None
 
     status: str
     reject_reason: str | None = None
@@ -165,6 +200,7 @@ class ReviewOut(_Base):
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_cost_usd: Decimal | None = None
+    llm_call_log_id: int | None = None
     created_at: datetime
 
 
@@ -204,4 +240,50 @@ class SystemHealthOut(_Base):
     status: str
     error_message: str | None = None
     stats: dict
+    created_at: datetime
+
+
+class LlmCallLogListItem(_Base):
+    """Light shape for the LLM logs page listing."""
+
+    id: int
+    purpose: str
+    provider: str
+    model: str
+    prompt_version: str
+    cached: bool
+    status: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: Decimal | None = None
+    latency_ms: int | None = None
+    error_message: str | None = None
+    created_at: datetime
+
+
+class LlmCallLogOut(_Base):
+    """Full payload, including system_prompt / user_input / raw_response_text /
+    thinking. Returned by GET /api/system/llm-logs/{id} so the user can audit
+    exactly what was sent to and returned from the model.
+    """
+
+    id: int
+    purpose: str
+    provider: str
+    model: str
+    prompt_version: str
+    input_hash: str
+    cached: bool
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: Decimal | None = None
+    latency_ms: int | None = None
+    status: str
+    error_message: str | None = None
+    attempts: int | None = None
+    system_prompt: str | None = None
+    user_input: dict | list | str | None = None
+    raw_response_text: str | None = None
+    thinking: str | None = None
+    response_payload: dict | list | str | None = None
     created_at: datetime

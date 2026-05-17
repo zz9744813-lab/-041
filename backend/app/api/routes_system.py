@@ -1,13 +1,14 @@
 """System health endpoints per spec § 18.9 / § 21."""
 from datetime import timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Integer, cast, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Asset, Candle, LlmCallLog, Signal, SystemHealth
-from app.schemas import SystemHealthOut
+from app.schemas import LlmCallLogListItem, LlmCallLogOut, SystemHealthOut
 from app.utils.time_utils import expected_latest_final_bar_start, utc_now
 
 router = APIRouter()
@@ -55,25 +56,82 @@ def llm_stats(days: int = 7, db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/llm-logs", response_model=list[LlmCallLogListItem])
+def list_llm_logs(
+    purpose: str | None = None,
+    status: str | None = None,
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    db: Session = Depends(get_db),
+):
+    """List recent LLM calls (light shape for the table view).
+
+    Use `GET /api/system/llm-logs/{id}` to fetch the full record including
+    the prompt, input payload, raw response and thinking content.
+    """
+    since = utc_now() - timedelta(days=days)
+    stmt = (
+        select(LlmCallLog)
+        .where(LlmCallLog.created_at >= since)
+        .order_by(desc(LlmCallLog.created_at))
+        .offset(offset)
+        .limit(limit)
+    )
+    if purpose:
+        stmt = stmt.where(LlmCallLog.purpose == purpose)
+    if status:
+        stmt = stmt.where(LlmCallLog.status == status)
+    return db.scalars(stmt).all()
+
+
+@router.get("/llm-logs/{log_id}", response_model=LlmCallLogOut)
+def get_llm_log(log_id: int, db: Session = Depends(get_db)):
+    """Returns a single LLM call log with the full prompt / input / raw
+    response / thinking content. This is the audit trail surface."""
+    row = db.get(LlmCallLog, log_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="LlmCallLog not found")
+    return row
+
+
 @router.get("/data-freshness")
 def data_freshness(db: Session = Depends(get_db)):
+    """Returns the freshness skew for every (active asset, timeframe).
+
+    Originally this issued 22 (assets) × 3 (timeframes) = 66 separate
+    "latest candle" queries. We now do it in a single GROUP BY.
+    """
     now = utc_now()
-    out: list[dict] = []
+    timeframes = ("1d", "4h", "1h")
+
     assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
+    if not assets:
+        return []
+
+    symbols = [a.symbol for a in assets]
+    latest_stmt = (
+        select(
+            Candle.symbol,
+            Candle.timeframe,
+            func.max(Candle.timestamp).label("ts"),
+        )
+        .where(
+            Candle.symbol.in_(symbols),
+            Candle.timeframe.in_(timeframes),
+            Candle.is_final.is_(True),
+        )
+        .group_by(Candle.symbol, Candle.timeframe)
+    )
+    latest: dict[tuple[str, str], object] = {
+        (r.symbol, r.timeframe): r.ts for r in db.execute(latest_stmt).all()
+    }
+
+    out: list[dict] = []
     for asset in assets:
-        for tf in ("1d", "4h", "1h"):
+        for tf in timeframes:
             expected = expected_latest_final_bar_start(asset.symbol, tf, now)
-            stmt = (
-                select(Candle.timestamp)
-                .where(
-                    Candle.symbol == asset.symbol,
-                    Candle.timeframe == tf,
-                    Candle.is_final.is_(True),
-                )
-                .order_by(desc(Candle.timestamp))
-                .limit(1)
-            )
-            actual = db.scalars(stmt).first()
+            actual = latest.get((asset.symbol, tf))
             skew_minutes = None
             if actual:
                 skew_minutes = (expected - actual).total_seconds() / 60

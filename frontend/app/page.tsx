@@ -28,12 +28,12 @@ function regimeColor(regime: string | null | undefined): 'success' | 'warning' |
 }
 
 export default function Home() {
-  const portfolioR = useSWR<PortfolioSnapshot | null>('/api/portfolio', fetcher, { refreshInterval: 30000 });
-  const regimeR = useSWR<RegimeRow>('/api/market/regime', fetcher, { refreshInterval: 60000 });
-  const signalsR = useSWR<SignalRow[]>('/api/signals?limit=10', fetcher, { refreshInterval: 30000 });
+  const portfolioR = useSWR<PortfolioSnapshot | null>('/api/portfolio', fetcher, { refreshInterval: 60000 });
+  const regimeR = useSWR<RegimeRow>('/api/market/regime', fetcher, { refreshInterval: 120000 });
+  const signalsR = useSWR<SignalRow[]>('/api/signals?limit=10', fetcher, { refreshInterval: 60000 });
   const equityR = useSWR<EquityCurvePoint[]>('/api/portfolio/equity-curve?days=30', fetcher);
   const drawdownR = useSWR<DrawdownPoint[]>('/api/portfolio/drawdown?days=30', fetcher);
-  const healthR = useSWR<SystemHealthRow[]>('/api/system/health', fetcher, { refreshInterval: 60000 });
+  const healthR = useSWR<SystemHealthRow[]>('/api/system/health', fetcher, { refreshInterval: 120000 });
 
   const portfolio = portfolioR.data ?? null;
   const totalReturn = portfolio ? Number(portfolio.total_return_pct) : 0;

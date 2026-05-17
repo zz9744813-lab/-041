@@ -5,6 +5,7 @@ top-scoring strategy (after weight). LLM augmentation goes in Step 9.
 """
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import StrategyModel
@@ -28,11 +29,26 @@ def combine(
     Per spec § 12.4 / § 12.5:
       effective_score = strategy.final_score * model_weight
     """
+    # One round-trip for all strategy weights instead of one per sub_score.
+    names = {sc.model_name for sc in sub_scores}
+    models = (
+        {m.name: m for m in db.scalars(select(StrategyModel).where(StrategyModel.name.in_(names))).all()}
+        if names
+        else {}
+    )
+
     weights: dict[str, float] = {}
     weighted: list[StrategyScore] = []
     for sc in sub_scores:
-        m = db.query(StrategyModel).filter_by(name=sc.model_name).first()
-        w = float(m.weight) if m and m.is_active else 1.0 if not m else 0.0
+        m = models.get(sc.model_name)
+        if m is None:
+            # Strategy not registered in DB -> default weight 1.0 (legacy
+            # behaviour); was previously a separate query that returned None.
+            w = 1.0
+        elif not m.is_active:
+            w = 0.0
+        else:
+            w = float(m.weight)
         weights[sc.model_name] = w
         adjusted = StrategyScore(**{**sc.__dict__, "final_score": int(sc.final_score * w)})
         weighted.append(adjusted)
