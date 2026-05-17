@@ -97,6 +97,7 @@ def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) 
     cost: Decimal | None = None
     provider: str | None = None
     model: str | None = None
+    llm_call_log_id: int | None = None
 
     if settings.anthropic_api_key or settings.openai_api_key:
         parsed, log = llm_client.call_llm_structured(
@@ -114,6 +115,7 @@ def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) 
             cost = log.cost_usd
             provider = log.provider
             model = log.model
+            llm_call_log_id = log.id
         else:
             logger.warning("review LLM failed; falling back to rule-based")
             review_data = _rule_based_review(trade)
@@ -134,6 +136,7 @@ def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) 
         existing.llm_provider = provider
         existing.llm_model = model
         existing.llm_cost_usd = cost
+        existing.llm_call_log_id = llm_call_log_id
         return existing
 
     review = Review(
@@ -149,6 +152,7 @@ def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) 
         llm_provider=provider,
         llm_model=model,
         llm_cost_usd=cost,
+        llm_call_log_id=llm_call_log_id,
     )
     db.add(review)
     return review

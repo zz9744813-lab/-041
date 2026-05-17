@@ -126,13 +126,18 @@ def generate_signal_plan_llm(
     one_hour_summary: dict,
     portfolio_context: dict,
     now: datetime | None = None,
-) -> tuple[SignalPlan | None, str]:
-    """Call LLM. Returns (plan, source) where source is 'llm' or 'cache'.
+    on_event=None,
+) -> tuple[SignalPlan | None, str, int | None]:
+    """Call LLM. Returns (plan, source, llm_call_log_id).
 
-    On any failure returns (None, 'failed')."""
+    `source` is 'llm' or 'cache' on success, 'disabled' or 'failed' otherwise.
+    `llm_call_log_id` is the LlmCallLog row produced by this call so callers
+    can persist the FK on the resulting Signal/Review.
+    On any failure returns (None, 'failed' or 'disabled', maybe None).
+    """
     settings = get_settings()
     if not settings.enable_llm_decision:
-        return None, "disabled"
+        return None, "disabled", None
 
     constraints = {
         "min_rr": float(settings.min_rr),
@@ -160,9 +165,10 @@ def generate_signal_plan_llm(
         user_input=payload,
         prompt_version=settings.prompt_version,
         schema=SignalPlan,
+        on_event=on_event,
     )
     if parsed is None:
         logger.warning("LLM signal failed: {}", log.error_message)
-        return None, "failed"
+        return None, "failed", log.id
     source = "cache" if log.cached else "llm"
-    return parsed, source
+    return parsed, source, log.id
