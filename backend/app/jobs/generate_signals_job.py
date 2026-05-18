@@ -10,7 +10,12 @@ Per spec § 20.1:
 7. Run risk check
 8. Try to open trade if approved + price in range
 9. Otherwise mark APPROVED_WAITING_ENTRY
+
+v2.1: persists `strategy_score` on each Signal and writes a SignalSkip row
+for every symbol where the LLM was NOT invoked, so the user can see why
+nothing happened from the UI instead of digging through scheduler logs.
 """
+import dataclasses
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -29,6 +34,7 @@ from app.models import (
     IndicatorSnapshot,
     MarketRegime,
     Signal,
+    SignalSkip,
 )
 from app.models.enums import Market, SignalStatus
 from app.schemas.signal_schema import SignalPlan
@@ -40,7 +46,7 @@ from app.services import (
     risk_service,
 )
 from app.strategies import ALL_STRATEGIES, combine
-from app.strategies.base import StrategyInput
+from app.strategies.base import StrategyInput, StrategyScore
 from app.utils.time_utils import utc_now
 
 
@@ -64,6 +70,36 @@ def _build_summary(ind: IndicatorSnapshot | None, candle: Candle | None) -> dict
     }
 
 
+def _strategy_score_to_dict(s: StrategyScore) -> dict:
+    """Convert StrategyScore dataclass to a JSON-safe dict for persistence."""
+    d = dataclasses.asdict(s)
+    # Decimal values come from rule-based scoring; stringify them
+    for k, v in list(d.items()):
+        if isinstance(v, Decimal):
+            d[k] = str(v)
+    return d
+
+
+def _record_skip(
+    db: Session,
+    batch_id: str,
+    symbol: str,
+    reason: str,
+    detail: str | None = None,
+    score: int | None = None,
+    model_name: str | None = None,
+) -> None:
+    skip = SignalSkip(
+        batch_id=batch_id,
+        symbol=symbol,
+        reason=reason,
+        detail=detail,
+        score=score,
+        model_name=model_name,
+    )
+    db.add(skip)
+
+
 def _persist_signal(
     db: Session,
     plan: SignalPlan,
@@ -73,6 +109,7 @@ def _persist_signal(
     llm_provider: str | None = None,
     llm_model: str | None = None,
     llm_call_log_id: int | None = None,
+    strategy_score: dict | None = None,
     now: datetime | None = None,
 ) -> Signal:
     now = now or utc_now()
@@ -107,6 +144,7 @@ def _persist_signal(
         risk_note=plan.risk_note,
         invalid_condition=plan.invalid_condition,
         follow_up_rule=plan.follow_up_rule,
+        strategy_score=strategy_score,
         input_hash=input_hash,
         llm_provider=llm_provider,
         llm_model=llm_model,
@@ -144,11 +182,11 @@ def _process_one_asset(
     now: datetime,
 ) -> dict:
     settings = get_settings()
-    # Load candles (need 1d/4h/1h)
     candles_1d = data_service.candles_until(db, asset.symbol, "1d", now, limit=300)
     candles_4h = data_service.candles_until(db, asset.symbol, "4h", now, limit=300)
     candles_1h = data_service.candles_until(db, asset.symbol, "1h", now, limit=300)
     if not candles_1d:
+        _record_skip(db, batch_id, asset.symbol, "no_1d_candles")
         return {"symbol": asset.symbol, "skipped": "no_1d_candles"}
 
     ind_1d = indicator_service.latest_snapshot(db, asset.symbol, "1d", now)
@@ -170,10 +208,16 @@ def _process_one_asset(
     sub_scores = [s.score(si) for s in ALL_STRATEGIES]
     composite = combine(db, si, sub_scores)
     if not composite.best_score:
+        _record_skip(db, batch_id, asset.symbol, "no_strategy_score")
         return {"symbol": asset.symbol, "skipped": "no_strategy_score"}
 
     best = composite.best_score
     if best.final_score < settings.strategy_score_threshold:
+        _record_skip(
+            db, batch_id, asset.symbol, "below_threshold",
+            detail=best.raw_reason,
+            score=best.final_score, model_name=best.model_name,
+        )
         return {
             "symbol": asset.symbol,
             "best_model": best.model_name,
@@ -220,7 +264,6 @@ def _process_one_asset(
         )
         source = "rule_fallback" if settings.enable_llm_decision else "rule"
 
-    # Compute input_hash for the persisted signal (different scope from llm cache)
     from app.services.llm_client import compute_input_hash
     input_hash = compute_input_hash(
         plan.model_dump(mode="json"), settings.prompt_version
@@ -229,10 +272,11 @@ def _process_one_asset(
     sig = _persist_signal(
         db, plan, best.model_name, input_hash, batch_id,
         llm_provider=llm_provider, llm_model=llm_model,
-        llm_call_log_id=llm_call_log_id, now=now,
+        llm_call_log_id=llm_call_log_id,
+        strategy_score=_strategy_score_to_dict(best),
+        now=now,
     )
 
-    # Run risk
     decision = risk_service.check(db, sig, now=now)
     if not decision.approved:
         sig.status = SignalStatus.REJECTED.value
@@ -251,7 +295,6 @@ def _process_one_asset(
     superseded = _supersede_pending(db, sig.symbol, sig.direction, sig.id)
     db.commit()
 
-    # Try to open trade
     trade = paper_trading_service.try_open_trade(db, sig, now=now)
 
     return {
@@ -274,18 +317,6 @@ def run_streaming(
     now: datetime | None = None,
     on_event: Callable[[dict], None] | None = None,
 ) -> dict:
-    """Same pipeline as :func:`run` but emits per-asset progress events.
-
-    `on_event` receives dicts like:
-        {"type": "asset_total", "total": 22}
-        {"type": "asset_start", "symbol": "AAPL"}
-        {"type": "asset_done", "symbol": "AAPL", "result": {...}}
-        {"type": "asset_error", "symbol": "AAPL", "error": "..."}
-
-    It is invoked synchronously in the worker thread so the caller can write
-    the events into a queue / SSE stream without coupling this module to any
-    web framework.
-    """
     now = now or utc_now()
     db = SessionLocal()
 
@@ -298,7 +329,6 @@ def run_streaming(
             logger.exception("on_event callback raised")
 
     try:
-        # Re-filter pending signals before any new ones
         rf = risk_service.re_filter_pending(db, now)
 
         regime = db.scalars(
@@ -312,9 +342,12 @@ def run_streaming(
             _emit({"type": "asset_start", "symbol": asset.symbol})
             try:
                 r = _process_one_asset(db, asset, regime, batch_id, now)
+                # Commit any SignalSkip rows recorded during this asset.
+                db.commit()
                 results.append(r)
                 _emit({"type": "asset_done", "symbol": asset.symbol, "result": r})
             except Exception as e:
+                db.rollback()
                 logger.exception("signal gen failed for {}", asset.symbol)
                 err = {"symbol": asset.symbol, "error": str(e)}
                 results.append(err)

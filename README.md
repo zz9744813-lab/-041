@@ -59,6 +59,51 @@ V1 完整闭环已搭建。Step 1-12 全部完成。
 - `/llm/decision` - **LLM 实时调试** (单标的流式跑决策,新增)
 - `/system` - 系统健康度(任务运行 / 数据新鲜度 / LLM 成本 / 风控拒绝 Top)
 
+## V2.2 第二轮强化 (`feat/round2-ops-and-visibility`)
+
+在 V2.1 基础上的进一步优化:
+
+**性能 (后端)**
+- `TradeOut` 拆 `TradeListItem`(轻) + `TradeOut`(全),`/api/trades` 加 `offset` 分页
+- `/api/reviews` 加 `offset` 分页 + 新增 `/api/reviews/by-trade/{trade_id}` 直查
+- `POST /api/reviews/generate/{trade_id}` 改 `BackgroundTasks` + 新增 `/api/llm/stream/review/{job_id}` SSE
+- `GET /api/models/summary` 一次返回 `StrategyModel + ModelStat + 近期 R 倍数`,替代 1+N+N 请求
+- `/api/models/{name}/recent-trades` 改用 `RMultipleScatterPoint` 轻 shape,payload 减约 90%
+- `paper_trading_service.update_all_open_positions` 修 N+1:一次查所有 OPEN 的 Trade + 一次 GROUP BY 查所有 1h 最新 bar
+- `daily_report_job` 用 `func.max()` + JOIN 替代 Python 内 `max(list)` 和逐 Position 的 `db.get(Trade)`
+- `trade_review_job` 一次 `IN` 查询所有已存在的 review_id,替代逐 trade 的 N+1 检查
+- `indicator_service` 改批量 UPSERT,跳过 DB 已存在的时间戳,只重算最新 3 根 + 新增 — 调度器一轮的 SELECT 减少 ~98%
+- 新增 Cache-Control 中间件:`/api/system/llm-logs/{id}` 永久缓存(append-only),`/api/assets` 5分钟,市场环境/统计 1分钟
+- 新索引:`Trade(status, exit_time)`、`Trade(signal_id)`、`Position(status)`、`Review(created_at)`
+
+**性能 (前端)**
+- `RunProgress` 改 `useReducer` 增量更新,从 O(events²) 降到 O(events);`onDone` 移到 `useEffect` 避免渲染体内 setTimeout 反复触发
+- 图表组件全部 `next/dynamic` 懒加载(recharts ~95KB / lightweight-charts ~50KB),首屏 bundle 显著瘦身
+- 历史交易、信号列表都改服务端分页(默认 50)
+- 系统页 polling 60s → 120s,任务列表改 `SystemHealthListItem` 轻 shape(去掉 `stats` JSON dict)
+
+**LLM 可见性**
+- `Signal.strategy_score` JSON 列:持久化触发 LLM 的完整 StrategyScore 分项分数(trend/setup/risk/volume/regime/r_r),信号详情面板可见
+- 新增 `SignalSkip` 表 + `/api/system/skip-reasons` + `/api/system/skips`:LLM 没被调用的原因(no_1d_candles / no_strategy_score / below_threshold)写入 DB,系统页可看
+- `LlmCallLog.attempt_history` JSON 列:每次重试的完整记录(原始文本 / 思考 / token / 错误),`/llm/[id]` 详情页可展开查看
+- `LlmCallLog.symbol` 列:用于成本归因(从 user_input 自动提取)
+- 新增 `/api/llm/cost-attribution`:按 symbol/model/purpose 分组统计成本
+- 新增 `/api/system/llm-budget` + `MAX_DAILY_LLM_COST_USD` 配置:每日花销超额时 LLM 调用自动短路为 `BUDGET_EXCEEDED`
+- 新增前端 `/llm/cost-attribution` 页:可切换分组、看预算进度
+- `/llm-stats` 增加 P50/P95 延迟、成功率、平均尝试次数
+- 风控拒绝原因 + 跳过原因可点击跳转到对应信号
+- 信号详情新增"策略评分明细"面板 + "关联交易"链接(双向 trace:signal ↔ trade)
+- 复盘卡片可展开看 K 线 + 嵌内联 LLM 调用详情链接 + "重新生成"按钮走 SSE 实时显示思考
+- `/api/signals/{id}/trade` 端点 + `/api/signals?reject_reason=X` 过滤 + `/api/trades?signal_id=N` 过滤
+- SSE `scores` 事件包含完整 StrategyScore 分项分数 → `/llm/decision` 实时调试页显示子分数进度条
+
+应用迁移:
+
+```bash
+cd backend
+alembic upgrade head     # 应用 20260518_round2 迁移
+```
+
 ## V2.1 性能 / LLM 透明度改造
 
 本分支(`feat/perf-llm-visibility`)的核心改进:

@@ -107,12 +107,18 @@ export default function LlmDecisionPlayground() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               {(scoresEv.data?.scores ?? []).map((s: any, i: number) => (
-                <div key={i} className="bg-zinc-950 p-2 rounded text-xs">
+                <div key={i} className="bg-zinc-950 p-2 rounded text-xs space-y-1">
                   <div className="flex justify-between font-mono">
-                    <span>{s.model}</span>
-                    <span>{s.final_score} (×{scoresEv.data?.weights_applied?.[s.model] ?? '?'})</span>
+                    <span>{s.model_name ?? s.model}</span>
+                    <span>{s.final_score} (×{scoresEv.data?.weights_applied?.[s.model_name ?? s.model] ?? '?'})</span>
                   </div>
-                  <div className="text-zinc-500 mt-1">{s.raw_reason || '—'}</div>
+                  <ScoreBar label="trend" v={s.trend_score} />
+                  <ScoreBar label="setup" v={s.setup_score} />
+                  <ScoreBar label="risk" v={s.risk_score} />
+                  <ScoreBar label="volume" v={s.volume_score} />
+                  <ScoreBar label="regime" v={s.market_regime_score} />
+                  <ScoreBar label="r/r" v={s.risk_reward_score} />
+                  <div className="text-zinc-500 pt-1">{s.raw_reason || '—'}</div>
                 </div>
               ))}
             </div>
@@ -170,6 +176,21 @@ export default function LlmDecisionPlayground() {
           <CardContent className="text-xs text-red-300 p-4">错误：{errorEv.data?.error}</CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function ScoreBar({ label, v }: { label: string; v: number | string | null | undefined }) {
+  if (v == null) return null;
+  const num = Number(v);
+  const pct = Math.max(0, Math.min(100, Number.isFinite(num) ? num : 0));
+  return (
+    <div className="flex items-center gap-2">
+      <div className="text-zinc-500 w-14">{label}</div>
+      <div className="h-1.5 bg-zinc-900 rounded overflow-hidden flex-1">
+        <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="font-mono w-8 text-right">{num}</div>
     </div>
   );
 }

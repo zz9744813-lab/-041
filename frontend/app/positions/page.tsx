@@ -1,10 +1,11 @@
 'use client';
 
 import { Download, Eye, X } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 
-import { CandleChart, type ChartMarker, type PriceLine } from '@/components/charts/candle-chart';
+import type { ChartMarker, PriceLine } from '@/components/charts/candle-chart';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +15,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { fetcher } from '@/lib/fetcher';
 import type { Candle, TradeRow } from '@/lib/types';
 import { downloadCSV, fmt } from '@/lib/utils';
+
+const CandleChart = dynamic(
+  () => import('@/components/charts/candle-chart').then((m) => m.CandleChart),
+  { ssr: false, loading: () => <div className="h-[320px] flex items-center justify-center text-zinc-500 text-xs">加载中...</div> },
+);
 
 export default function Positions() {
   const { data: trades, error } = useSWR<TradeRow[]>('/api/trades?status=OPEN', fetcher, { refreshInterval: 60000 });

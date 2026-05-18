@@ -1,10 +1,9 @@
 'use client';
 
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Briefcase, Activity } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 
-import { DrawdownChart } from '@/components/charts/drawdown';
-import { EquityCurveChart } from '@/components/charts/equity-curve';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
@@ -18,6 +17,16 @@ import type {
   SystemHealthRow,
 } from '@/lib/types';
 import { cn, fmt, fmtPct } from '@/lib/utils';
+
+// Lazy-load recharts so the dashboard only pulls it when needed.
+const DrawdownChart = dynamic(
+  () => import('@/components/charts/drawdown').then((m) => m.DrawdownChart),
+  { ssr: false, loading: () => <LoadingState /> },
+);
+const EquityCurveChart = dynamic(
+  () => import('@/components/charts/equity-curve').then((m) => m.EquityCurveChart),
+  { ssr: false, loading: () => <LoadingState /> },
+);
 
 function regimeColor(regime: string | null | undefined): 'success' | 'warning' | 'danger' | 'muted' {
   if (!regime) return 'muted';

@@ -59,6 +59,7 @@ export default function LlmLogDetail({ params }: PageProps) {
                   <Stat label="输出 tokens" value={log.output_tokens?.toLocaleString() ?? '—'} />
                   <Stat label="成本 USD" value={`$${log.cost_usd ?? '0'}`} />
                   <Stat label="延迟" value={log.latency_ms != null ? `${log.latency_ms} ms` : '—'} />
+                  <Stat label="标的" value={log.symbol ?? '—'} mono />
                   <Stat label="input_hash" value={log.input_hash.slice(0, 12) + '…'} mono />
                 </div>
                 {log.error_message && (
@@ -68,6 +69,36 @@ export default function LlmLogDetail({ params }: PageProps) {
                 )}
               </CardContent>
             </Card>
+
+            {log.attempt_history && log.attempt_history.length > 0 && (
+              <Block icon={<Brain className="h-4 w-4" />} title="尝试历史 (Attempt History)" hint="每次尝试的完整记录。失败的重试也会保留原始文本和错误。">
+                <div className="space-y-3">
+                  {log.attempt_history.map((a) => (
+                    <div key={a.n} className="bg-zinc-950 p-3 rounded text-xs space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={a.ok ? 'success' : 'danger'}>第 {a.n} 次 · {a.ok ? '成功' : '失败'}</Badge>
+                        {a.input_tokens != null && <span className="text-zinc-500">in {a.input_tokens}</span>}
+                        {a.output_tokens != null && <span className="text-zinc-500">out {a.output_tokens}</span>}
+                        {a.latency_ms != null && <span className="text-zinc-500">{a.latency_ms} ms</span>}
+                      </div>
+                      {a.error && <div className="text-red-400 whitespace-pre-wrap">{a.error}</div>}
+                      {a.thinking && (
+                        <details>
+                          <summary className="cursor-pointer text-zinc-400">思考</summary>
+                          <pre className="whitespace-pre-wrap text-zinc-300 mt-2 max-h-64 overflow-auto">{a.thinking}</pre>
+                        </details>
+                      )}
+                      {a.raw_text && (
+                        <details>
+                          <summary className="cursor-pointer text-zinc-400">原始响应</summary>
+                          <pre className="whitespace-pre-wrap text-zinc-300 mt-2 max-h-64 overflow-auto">{a.raw_text}</pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Block>
+            )}
 
             {log.thinking && (
               <Block icon={<Brain className="h-4 w-4" />} title="思考过程 (extended thinking)" hint="模型在产出最终答案前的内部推理。仅 Claude 等支持 extended thinking 的模型有内容。">

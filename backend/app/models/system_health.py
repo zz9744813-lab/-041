@@ -55,6 +55,13 @@ class LlmCallLog(Base):
     raw_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     thinking: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Per-attempt history so failed retries are auditable:
+    # [{n: 1, ok: false, error, raw_text, thinking, input_tokens,
+    #   output_tokens, latency_ms}, ...]
+    attempt_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Denormalized symbol from user_input so we can do cheap GROUP BY for
+    # the cost-attribution view. Nullable for non-symbol-scoped purposes.
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True

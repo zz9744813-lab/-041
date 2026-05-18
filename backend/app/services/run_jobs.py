@@ -106,6 +106,7 @@ def enqueue_run_signals(background_tasks: BackgroundTasks) -> str:
     with _LOCK:
         _JOBS[job_id] = {
             "job_id": job_id,
+            "kind": "generate_signals",
             "status": "QUEUED",
             "started_at": None,
             "finished_at": None,
@@ -117,6 +118,25 @@ def enqueue_run_signals(background_tasks: BackgroundTasks) -> str:
         }
     background_tasks.add_task(_run_generate_signals, job_id)
     HUB.publish(job_id, {"type": "queued", "job_id": job_id, "ts": time.time()})
+    return job_id
+
+
+def enqueue_run_review(background_tasks: BackgroundTasks, trade_id: int) -> str:
+    """Schedule review_service.generate_for_trade in the background."""
+    job_id = str(uuid.uuid4())
+    with _LOCK:
+        _JOBS[job_id] = {
+            "job_id": job_id,
+            "kind": "review",
+            "trade_id": trade_id,
+            "status": "QUEUED",
+            "started_at": None,
+            "finished_at": None,
+            "error": None,
+            "result": None,
+        }
+    background_tasks.add_task(_run_review, job_id, trade_id)
+    HUB.publish(job_id, {"type": "queued", "job_id": job_id, "trade_id": trade_id, "ts": time.time()})
     return job_id
 
 
@@ -168,3 +188,31 @@ def _run_generate_signals(job_id: str) -> None:
             error=str(e),
         )
         HUB.publish(job_id, {"type": "finished", "status": "FAILED", "ts": time.time(), "error": str(e)})
+
+
+def _run_review(job_id: str, trade_id: int) -> None:
+    """Wraps `app.services.review_service.generate_for_trade` with SSE events."""
+    from app.database import SessionLocal
+    from app.services import review_service
+
+    _set(job_id, status="RUNNING", started_at=time.time())
+    HUB.publish(job_id, {"type": "started", "trade_id": trade_id, "ts": time.time()})
+
+    db = SessionLocal()
+    try:
+        review = review_service.generate_for_trade(
+            db,
+            trade_id,
+            on_event=lambda ev: HUB.publish(job_id, {**ev, "ts": time.time()}),
+        )
+        db.commit()
+        result = {"review_id": review.id, "trade_id": trade_id}
+        _set(job_id, status="SUCCESS", finished_at=time.time(), result=result)
+        HUB.publish(job_id, {"type": "finished", "status": "SUCCESS", "ts": time.time(), "result": result})
+    except Exception as e:
+        db.rollback()
+        logger.exception("background review failed")
+        _set(job_id, status="FAILED", finished_at=time.time(), error=str(e))
+        HUB.publish(job_id, {"type": "finished", "status": "FAILED", "ts": time.time(), "error": str(e)})
+    finally:
+        db.close()
