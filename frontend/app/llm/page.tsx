@@ -75,6 +75,7 @@ export default function LlmLogs() {
             <option value={30}>近 30 天</option>
             <option value={90}>近 90 天</option>
           </select>
+          <Link href="/llm/cost-attribution" className="text-xs text-blue-400 hover:underline">成本归因 →</Link>
           <Link href="/llm/decision" className="text-xs text-blue-400 hover:underline">实时调试 →</Link>
         </div>
       </div>

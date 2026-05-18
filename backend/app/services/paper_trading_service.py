@@ -302,13 +302,103 @@ def manual_close(db: Session, trade: Trade, now: datetime | None = None) -> None
 
 
 def update_all_open_positions(db: Session, now: datetime | None = None) -> dict:
+    """Per spec § 15.4 - update every OPEN position; bulk-fetches Trade rows
+    and latest 1h bars in two queries instead of 2N round-trips.
+    """
     now = now or utc_now()
     positions = list(db.scalars(select(Position).where(Position.status == "OPEN")).all())
+    if not positions:
+        return {"checked": 0, "closed": 0}
+
+    trade_ids = [p.trade_id for p in positions]
+    symbols = list({p.symbol for p in positions})
+
+    # Bulk Trade fetch
+    trade_map: dict[int, Trade] = {
+        t.id: t for t in db.scalars(select(Trade).where(Trade.id.in_(trade_ids))).all()
+    }
+
+    # Bulk latest-1h bar fetch (one GROUP BY per symbol).
+    from sqlalchemy import func as _func, tuple_ as _tuple
+
+    latest_per_symbol = (
+        select(Candle.symbol, _func.max(Candle.timestamp).label("ts"))
+        .where(
+            Candle.symbol.in_(symbols),
+            Candle.timeframe == "1h",
+            Candle.is_final.is_(True),
+            Candle.timestamp <= now,
+        )
+        .group_by(Candle.symbol)
+        .subquery()
+    )
+    bar_stmt = (
+        select(Candle)
+        .join(
+            latest_per_symbol,
+            _tuple(Candle.symbol, Candle.timestamp)
+            == _tuple(latest_per_symbol.c.symbol, latest_per_symbol.c.ts),
+        )
+        .where(Candle.timeframe == "1h", Candle.is_final.is_(True))
+    )
+    bar_map: dict[str, Candle] = {b.symbol: b for b in db.scalars(bar_stmt).all()}
+
     closed = 0
     for p in positions:
+        bar = bar_map.get(p.symbol)
+        trade = trade_map.get(p.trade_id)
+        if bar is None or trade is None or trade.status != TradeStatus.OPEN.value:
+            continue
         before = p.status
-        update_position(db, p, now)
-        db.refresh(p)
+        _apply_position_update(db, p, trade, bar, now)
         if p.status != before:
             closed += 1
     return {"checked": len(positions), "closed": closed}
+
+
+def _apply_position_update(
+    db: Session, position: Position, trade: Trade, bar: Candle, now: datetime
+) -> None:
+    """Same logic as `update_position` but assumes Trade + bar are already loaded."""
+    position.current_price = bar.close
+    position.unrealized_pnl = (bar.close - trade.entry_price) * trade.quantity
+    position.unrealized_pnl_pct = (bar.close / trade.entry_price - Decimal("1"))
+    if bar.high > position.max_favorable_excursion:
+        position.max_favorable_excursion = bar.high
+    if bar.low < position.max_adverse_excursion or position.max_adverse_excursion == 0:
+        position.max_adverse_excursion = bar.low
+    position.holding_days = (now - trade.entry_time).days
+    db.commit()
+
+    sl = trade.stop_loss_current
+    tp1 = trade.target_1
+    tp2 = trade.target_2
+
+    hit_sl = bar.low <= sl
+    hit_tp1 = tp1 is not None and bar.high >= tp1
+    hit_tp2 = tp2 is not None and bar.high >= tp2
+
+    if hit_sl and (hit_tp1 or hit_tp2):
+        _close_trade(db, trade, sl, bar.timestamp, ExitReason.STOP_LOSS.value,
+                     "SL_PRIORITY_WHEN_CONFLICT")
+        return
+    if bar.open <= sl:
+        _close_trade(db, trade, bar.open, bar.timestamp, ExitReason.STOP_LOSS.value,
+                     "GAP_DOWN_OPEN")
+        return
+    if hit_sl:
+        _close_trade(db, trade, sl, bar.timestamp, ExitReason.STOP_LOSS.value)
+        return
+    if hit_tp2:
+        _close_trade(db, trade, tp2, bar.timestamp, ExitReason.TAKE_PROFIT_2.value)
+        return
+    if hit_tp1:
+        _close_trade(db, trade, tp1, bar.timestamp, ExitReason.TAKE_PROFIT_1.value)
+        return
+
+    _update_trailing_stop(trade, bar)
+    db.commit()
+
+    if trade.max_holding_days and position.holding_days >= trade.max_holding_days:
+        _close_trade(db, trade, bar.close, bar.timestamp, ExitReason.MAX_HOLDING.value)
+        return

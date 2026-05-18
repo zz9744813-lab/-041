@@ -1,15 +1,19 @@
-"""LLM client - unified entry per spec § 17.4 (v2: with full audit trail).
+"""LLM client - unified entry per spec § 17.4 (v2.1: budget guard + per-attempt history).
 
 Workflow:
 1. Compute input_hash = sha256(canonical(input_data) + prompt_version)
 2. Cache lookup in LlmCallLog by (input_hash, model, prompt_version, status=SUCCESS)
-3. On miss: call provider (optionally with extended thinking + streaming),
-   capture raw text, validate via Pydantic schema
-4. Schema fail: retry once asking LLM to fix
-5. Persist LlmCallLog WITH system_prompt / user_input / raw_response_text /
-   thinking - so the user can see exactly what was sent and returned
+3. Daily-cost guardrail: if today's spend >= settings.max_daily_llm_cost_usd, refuse.
+4. On miss: call provider (optionally with extended thinking + streaming),
+   capture raw text, validate via Pydantic schema. Each attempt is recorded
+   in `attempt_history` so failed retries are auditable.
+5. Schema fail: retry once asking LLM to fix
+6. Persist LlmCallLog WITH system_prompt / user_input / raw_response_text /
+   thinking / attempt_history / symbol so the UI can audit the full trail.
 6. Return parsed result + log
 """
+from __future__ import annotations
+
 import hashlib
 import json
 import time
@@ -19,7 +23,7 @@ from typing import Any, Callable, Type, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -56,6 +60,18 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> Decimal:
     )
 
 
+def todays_cost_usd(db: Session, now: datetime | None = None) -> Decimal:
+    """Sum of `cost_usd` for non-cached calls created today (UTC)."""
+    now = now or utc_now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    stmt = (
+        select(func.coalesce(func.sum(LlmCallLog.cost_usd), 0))
+        .where(LlmCallLog.created_at >= day_start, LlmCallLog.cached.is_(False))
+    )
+    val = db.execute(stmt).scalar_one()
+    return Decimal(val) if val is not None else Decimal("0")
+
+
 def _cache_lookup(
     db: Session, input_hash: str, model: str, prompt_version: str
 ) -> LlmCallLog | None:
@@ -71,6 +87,15 @@ def _cache_lookup(
         .limit(1)
     )
     return db.scalars(stmt).first()
+
+
+def _extract_symbol(user_data: Any) -> str | None:
+    """Pull `symbol` out of user_input for cost-attribution queries."""
+    if isinstance(user_data, dict):
+        sym = user_data.get("symbol")
+        if isinstance(sym, str):
+            return sym[:32]
+    return None
 
 
 def _persist_log(
@@ -94,6 +119,8 @@ def _persist_log(
     raw_response_text: str | None = None,
     thinking: str | None = None,
     attempts: int | None = None,
+    attempt_history: list | None = None,
+    symbol: str | None = None,
 ) -> LlmCallLog:
     log = LlmCallLog(
         purpose=purpose,
@@ -114,6 +141,8 @@ def _persist_log(
         raw_response_text=raw_response_text,
         thinking=thinking,
         attempts=attempts,
+        attempt_history=attempt_history,
+        symbol=symbol,
     )
     db.add(log)
     db.commit()
@@ -130,16 +159,7 @@ def _call_anthropic(
     enable_thinking: bool = False,
     on_token: Callable[[dict], None] | None = None,
 ) -> tuple[str, str, int, int]:
-    """Returns (text, thinking, input_tokens, output_tokens).
-
-    `text` is the answer-block content (concatenated `TextBlock.text`).
-    `thinking` is the concatenation of any `ThinkingBlock` content the model
-    emitted - empty string when extended thinking is disabled or the model
-    doesn't produce any.
-
-    If `on_token` is provided, runs in streaming mode and emits dicts
-    {"type": "thinking_delta"|"text_delta", "text": str} as the model writes.
-    """
+    """Returns (text, thinking, input_tokens, output_tokens)."""
     from anthropic import Anthropic
 
     settings = get_settings()
@@ -148,8 +168,6 @@ def _call_anthropic(
 
     extra: dict[str, Any] = {}
     if enable_thinking:
-        # Conservative budget so a misconfigured model doesn't stall - the
-        # caller can tune via settings if needed.
         extra["thinking"] = {"type": "enabled", "budget_tokens": 4000}
 
     if on_token is None:
@@ -169,7 +187,6 @@ def _call_anthropic(
             elif t == "text":
                 text_parts.append(getattr(block, "text", "") or "")
             else:
-                # Unknown block; try to grab `.text` defensively.
                 fallback = getattr(block, "text", None)
                 if fallback:
                     text_parts.append(fallback)
@@ -181,8 +198,8 @@ def _call_anthropic(
         )
 
     # Streaming path
-    text_parts: list[str] = []
-    thinking_parts: list[str] = []
+    text_parts_s: list[str] = []
+    thinking_parts_s: list[str] = []
     input_tokens = 0
     output_tokens = 0
     with client.messages.stream(
@@ -200,19 +217,19 @@ def _call_anthropic(
                 if dtype == "thinking_delta":
                     chunk = getattr(delta, "thinking", "") or ""
                     if chunk:
-                        thinking_parts.append(chunk)
+                        thinking_parts_s.append(chunk)
                         on_token({"type": "thinking_delta", "text": chunk})
                 elif dtype == "text_delta":
                     chunk = getattr(delta, "text", "") or ""
                     if chunk:
-                        text_parts.append(chunk)
+                        text_parts_s.append(chunk)
                         on_token({"type": "text_delta", "text": chunk})
         final = stream.get_final_message()
         usage = getattr(final, "usage", None)
         if usage:
             input_tokens = getattr(usage, "input_tokens", 0) or 0
             output_tokens = getattr(usage, "output_tokens", 0) or 0
-    return "".join(text_parts), "".join(thinking_parts), input_tokens, output_tokens
+    return "".join(text_parts_s), "".join(thinking_parts_s), input_tokens, output_tokens
 
 
 def _call_openai(
@@ -223,12 +240,6 @@ def _call_openai(
     *,
     on_token: Callable[[dict], None] | None = None,
 ) -> tuple[str, str, int, int]:
-    """Returns (text, thinking, input_tokens, output_tokens).
-
-    Note: `thinking` is always "" because the OpenAI public API doesn't
-    expose chain-of-thought tokens for any model (reasoning summaries are
-    server-side only). Returned for shape parity with Anthropic.
-    """
     from openai import OpenAI
 
     settings = get_settings()
@@ -248,7 +259,6 @@ def _call_openai(
         usage = resp.usage
         return text, "", usage.prompt_tokens, usage.completion_tokens
 
-    # Streaming path
     text_parts: list[str] = []
     input_tokens = 0
     output_tokens = 0
@@ -278,7 +288,6 @@ def _call_openai(
 def _strip_json_fence(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
-        # remove first fence and last fence
         first_nl = t.find("\n")
         if first_nl > 0:
             t = t[first_nl + 1 :]
@@ -300,17 +309,7 @@ def call_llm_structured(
     enable_thinking: bool | None = None,
     on_event: Callable[[dict], None] | None = None,
 ) -> tuple[T | None, LlmCallLog]:
-    """Call LLM with structured-output validation + cache + retry.
-
-    Persists `system_prompt`, `user_input`, `raw_response_text`, `thinking`,
-    `attempts` into the LlmCallLog so the UI can audit the full conversation.
-
-    `on_event` (if given) receives streaming events:
-        {"type": "thinking_delta"|"text_delta", "text": str}
-        {"type": "attempt_start", "attempt": 1}
-        {"type": "attempt_done", "attempt": 1, "ok": True/False, "error": "..."}
-        {"type": "cache_hit"}
-    """
+    """Call LLM with structured-output validation + cache + retry + budget guard."""
     settings = get_settings()
     now = now or utc_now()
     provider = settings.llm_provider
@@ -319,10 +318,9 @@ def call_llm_structured(
     )
     user_data = user_input.model_dump(mode="json") if isinstance(user_input, BaseModel) else user_input
     input_hash = compute_input_hash(user_data, prompt_version)
+    sym = _extract_symbol(user_data)
 
     if enable_thinking is None:
-        # Default-on for Anthropic when an extended-thinking-capable family
-        # is used. OpenAI ignores this.
         enable_thinking = provider == "anthropic" and (
             "claude-sonnet" in model
             or "claude-opus" in model
@@ -339,7 +337,7 @@ def call_llm_structured(
         except Exception:
             logger.exception("on_event raised")
 
-    # 1. Cache lookup
+    # 1. Cache lookup (always free - happens before budget check)
     cached = _cache_lookup(db, input_hash, model, prompt_version)
     if cached and cached.response_payload:
         try:
@@ -356,12 +354,34 @@ def call_llm_structured(
                 raw_response_text=cached.raw_response_text,
                 thinking=cached.thinking,
                 attempts=0,
+                symbol=sym or cached.symbol,
             )
             return parsed, log
         except ValidationError as e:
             logger.warning("cache hit but schema mismatch: {}", e)
 
-    # 2. Fresh call (with up to 1 retry)
+    # 2. Budget guardrail (only meaningful if max > 0)
+    if settings.max_daily_llm_cost_usd and settings.max_daily_llm_cost_usd > 0:
+        spent = todays_cost_usd(db, now)
+        if spent >= settings.max_daily_llm_cost_usd:
+            msg = (
+                f"daily cost cap reached: spent ${spent} / cap ${settings.max_daily_llm_cost_usd}"
+            )
+            logger.warning(msg)
+            _emit({"type": "budget_exceeded", "spent_usd": str(spent),
+                   "cap_usd": str(settings.max_daily_llm_cost_usd)})
+            log = _persist_log(
+                db, purpose, provider, model, prompt_version, input_hash,
+                cached=False, status="BUDGET_EXCEEDED",
+                error_message=msg,
+                system_prompt=system_prompt,
+                user_input=user_data,
+                attempts=0,
+                symbol=sym,
+            )
+            return None, log
+
+    # 3. Fresh call (with up to 1 retry); record per-attempt history
     last_error: str | None = None
     last_text = ""
     last_thinking = ""
@@ -369,6 +389,7 @@ def call_llm_structured(
     last_output_tokens = 0
     last_latency_ms = 0
     attempt_count = 0
+    history: list[dict] = []
     for attempt in range(2):
         attempt_count = attempt + 1
         _emit({"type": "attempt_start", "attempt": attempt_count})
@@ -396,15 +417,30 @@ def call_llm_structured(
                 parsed_json = json.loads(_strip_json_fence(text))
             except json.JSONDecodeError as e:
                 last_error = f"json_decode: {e}"
+                history.append({
+                    "n": attempt_count, "ok": False, "error": last_error,
+                    "raw_text": text[:8000], "thinking": thinking[:8000] or None,
+                    "input_tokens": tin, "output_tokens": tout, "latency_ms": latency,
+                })
                 _emit({"type": "attempt_done", "attempt": attempt_count, "ok": False, "error": last_error})
                 continue
             try:
                 parsed = schema.model_validate(parsed_json)
             except ValidationError as e:
                 last_error = f"schema: {e}"
+                history.append({
+                    "n": attempt_count, "ok": False, "error": last_error,
+                    "raw_text": text[:8000], "thinking": thinking[:8000] or None,
+                    "input_tokens": tin, "output_tokens": tout, "latency_ms": latency,
+                })
                 _emit({"type": "attempt_done", "attempt": attempt_count, "ok": False, "error": last_error})
                 continue
             cost = estimate_cost(model, tin, tout)
+            history.append({
+                "n": attempt_count, "ok": True, "error": None,
+                "raw_text": text[:8000], "thinking": thinking[:8000] or None,
+                "input_tokens": tin, "output_tokens": tout, "latency_ms": latency,
+            })
             log = _persist_log(
                 db, purpose, provider, model, prompt_version, input_hash,
                 cached=False, status="SUCCESS",
@@ -415,15 +451,22 @@ def call_llm_structured(
                 raw_response_text=text,
                 thinking=thinking or None,
                 attempts=attempt_count,
+                attempt_history=history,
+                symbol=sym,
             )
             _emit({"type": "attempt_done", "attempt": attempt_count, "ok": True})
             return parsed, log
         except Exception as e:
             last_error = f"api: {e}"
             logger.exception("llm api error attempt {}", attempt)
+            history.append({
+                "n": attempt_count, "ok": False, "error": last_error,
+                "raw_text": None, "thinking": None,
+                "input_tokens": None, "output_tokens": None, "latency_ms": None,
+            })
             _emit({"type": "attempt_done", "attempt": attempt_count, "ok": False, "error": last_error})
 
-    # All failed - still persist what we have for debugging
+    # All failed - persist what we have for debugging
     cost = estimate_cost(model, last_input_tokens, last_output_tokens)
     log = _persist_log(
         db, purpose, provider, model, prompt_version, input_hash,
@@ -438,5 +481,7 @@ def call_llm_structured(
         raw_response_text=last_text or None,
         thinking=last_thinking or None,
         attempts=attempt_count or None,
+        attempt_history=history if history else None,
+        symbol=sym,
     )
     return None, log

@@ -58,12 +58,9 @@ async def stream_run_signals(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     async def event_gen() -> AsyncIterator[str]:
-        # Replay history first so a late subscriber catches up.
         for ev in HUB.history(job_id):
             yield _sse_pack(ev.get("type", "message"), ev)
         with HUB.subscribe(job_id) as q:
-            # Heartbeat so flaky proxies don't kill the connection.
-            last = time.time()
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=15.0)
@@ -71,7 +68,35 @@ async def stream_run_signals(job_id: str):
                     yield ": ping\n\n"
                     continue
                 yield _sse_pack(ev.get("type", "message"), ev)
-                last = time.time()
+                if ev.get("type") == "finished":
+                    break
+        yield _sse_pack("end", {"job_id": job_id, "ts": time.time()})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/stream/review/{job_id}")
+async def stream_review(job_id: str):
+    """Stream thinking + text deltas for a review-regeneration job."""
+    info = run_jobs.get_job_status(job_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    async def event_gen() -> AsyncIterator[str]:
+        for ev in HUB.history(job_id):
+            yield _sse_pack(ev.get("type", "message"), ev)
+        with HUB.subscribe(job_id) as q:
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                yield _sse_pack(ev.get("type", "message"), ev)
                 if ev.get("type") == "finished":
                     break
         yield _sse_pack("end", {"job_id": job_id, "ts": time.time()})
@@ -156,18 +181,24 @@ async def stream_decision(symbol: str):
             emit_to_queue({"type": "stage", "stage": "scoring", "symbol": symbol})
             sub_scores = [s.score(si) for s in ALL_STRATEGIES]
             composite = combine(db, si, sub_scores)
+
+            # Full breakdown so the playground can show trend / setup / risk
+            # / volume / market_regime / risk_reward sub-scores per strategy.
+            def _score_dict(s) -> dict:
+                import dataclasses
+                from decimal import Decimal as _D
+
+                d = dataclasses.asdict(s)
+                for k, v in list(d.items()):
+                    if isinstance(v, _D):
+                        d[k] = str(v)
+                return d
+
             emit_to_queue(
                 {
                     "type": "scores",
                     "symbol": symbol,
-                    "scores": [
-                        {
-                            "model": s.model_name,
-                            "final_score": s.final_score,
-                            "raw_reason": s.raw_reason,
-                        }
-                        for s in composite.all_scores
-                    ],
+                    "scores": [_score_dict(s) for s in composite.all_scores],
                     "weights_applied": composite.weights_applied,
                     "regime": regime.regime if regime else None,
                 }

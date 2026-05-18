@@ -77,7 +77,25 @@ export interface SignalRow {
   llm_cost_usd: string | null;
 }
 
-/** Full signal payload (returned by GET /api/signals/{id}). */
+export interface StrategyScoreBreakdown {
+  symbol?: string;
+  model_name: string;
+  trend_score?: number | string;
+  setup_score?: number | string;
+  risk_score?: number | string;
+  volume_score?: number | string;
+  market_regime_score?: number | string;
+  risk_reward_score?: number | string;
+  final_score: number;
+  raw_reason?: string;
+  suggested_action?: string;
+  entry_low?: string | null;
+  entry_high?: string | null;
+  stop_loss?: string | null;
+  target_1?: string | null;
+  target_2?: string | null;
+}
+
 export interface SignalDetail extends SignalRow {
   schema_version: string;
   signal_decay_hours: number | null;
@@ -85,6 +103,7 @@ export interface SignalDetail extends SignalRow {
   risk_note: string;
   invalid_condition: string;
   follow_up_rule: string | null;
+  strategy_score: StrategyScoreBreakdown | null;
   input_hash: string;
   llm_input_tokens: number | null;
   llm_output_tokens: number | null;
@@ -94,6 +113,7 @@ export interface SignalDetail extends SignalRow {
   updated_at: string;
 }
 
+/** Light shape from /api/trades. */
 export interface TradeRow {
   id: number;
   signal_id: number;
@@ -117,6 +137,17 @@ export interface TradeRow {
   pnl_pct: string | null;
   realized_r_multiple: string | null;
   status: string;
+}
+
+/** Full shape from /api/trades/{id}. */
+export interface TradeDetail extends TradeRow {
+  entry_fill_policy: string;
+  slippage_paid: string;
+  fee_paid: string;
+  exit_fill_policy: string | null;
+  max_holding_days: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ReviewRow {
@@ -163,6 +194,24 @@ export interface ModelStatRow {
   last_computed_at: string;
 }
 
+export interface RMultipleScatterPoint {
+  exit_time: string;
+  realized_r_multiple: string | null;
+  pnl_pct: string | null;
+  symbol: string;
+  exit_reason: string | null;
+}
+
+export interface ModelSummaryRow {
+  name: string;
+  description: string;
+  weight: string;
+  is_active: boolean;
+  auto_adjust_weight: boolean;
+  stat: ModelStatRow | null;
+  recent_r_multiples: RMultipleScatterPoint[];
+}
+
 export interface SystemHealthRow {
   id: number;
   job_name: string;
@@ -170,6 +219,9 @@ export interface SystemHealthRow {
   finished_at: string | null;
   status: 'RUNNING' | 'SUCCESS' | 'FAILED';
   error_message: string | null;
+}
+
+export interface SystemHealthDetail extends SystemHealthRow {
   stats: Record<string, unknown>;
 }
 
@@ -190,11 +242,26 @@ export interface LlmStatRow {
   input_tokens: number;
   output_tokens: number;
   cost_usd: string;
+  avg_attempts: number | null;
+  success_rate: number | null;
+  latency_p50_ms: number | null;
+  latency_p95_ms: number | null;
 }
 
 export interface RejectReasonRow {
   reason: string;
   n: number;
+}
+
+export interface SignalSkipRow {
+  id: number;
+  batch_id: string;
+  symbol: string;
+  reason: string;
+  detail: string | null;
+  score: number | null;
+  model_name: string | null;
+  created_at: string;
 }
 
 export interface EquityCurvePoint {
@@ -208,6 +275,17 @@ export interface DrawdownPoint {
   drawdown_pct: string;
 }
 
+export interface AttemptHistoryEntry {
+  n: number;
+  ok: boolean;
+  error: string | null;
+  raw_text: string | null;
+  thinking: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number | null;
+}
+
 export interface LlmCallLogListItem {
   id: number;
   purpose: string;
@@ -216,17 +294,19 @@ export interface LlmCallLogListItem {
   prompt_version: string;
   cached: boolean;
   status: string;
+  symbol: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
   cost_usd: string | null;
   latency_ms: number | null;
   error_message: string | null;
+  attempts: number | null;
   created_at: string;
 }
 
 export interface LlmCallLogDetail extends LlmCallLogListItem {
   input_hash: string;
-  attempts: number | null;
+  attempt_history: AttemptHistoryEntry[] | null;
   system_prompt: string | null;
   user_input: unknown | null;
   raw_response_text: string | null;
@@ -234,8 +314,25 @@ export interface LlmCallLogDetail extends LlmCallLogListItem {
   response_payload: unknown | null;
 }
 
+export interface LlmCostAttributionRow {
+  key: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: string;
+}
+
+export interface LlmBudgetInfo {
+  spent_usd: string;
+  cap_usd: string;
+  remaining_usd: string | null;
+  enforced: boolean;
+}
+
 export interface RunSignalsJobStatus {
   job_id: string;
+  kind?: string;
+  trade_id?: number;
   status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED';
   started_at: number | null;
   finished_at: number | null;

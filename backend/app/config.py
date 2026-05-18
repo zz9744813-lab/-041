@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     narration_model: str = "claude-sonnet-4-6"
     enable_llm_decision: bool = False
     prompt_version: str = "1.0"
+    # Per-day USD spending cap. 0 = no cap. When the cumulative
+    # cost_usd of today's LlmCallLog rows reaches this value, llm_client
+    # short-circuits with status=BUDGET_EXCEEDED instead of calling out.
+    max_daily_llm_cost_usd: Decimal = Decimal("0")
 
     # ---- Risk (defaults from spec § 14.4) ----
     initial_capital_usd: Decimal = Decimal("100000")

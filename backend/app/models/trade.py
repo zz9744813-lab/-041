@@ -70,6 +70,11 @@ class Trade(Base):
         Index("ix_trades_symbol", "symbol"),
         Index("ix_trades_model", "model_name"),
         Index("ix_trades_entry_time", "entry_time"),
+        # Used by /api/trades?status=CLOSED ordered by exit_time and by
+        # daily_report_job's "today's closed pnl" query.
+        Index("ix_trades_status_exit_time", "status", "exit_time"),
+        # /api/signals/{id}/trade and /api/trades?signal_id=N
+        Index("ix_trades_signal_id", "signal_id"),
     )
 
 
@@ -96,7 +101,7 @@ class Position(Base):
         PRICE, default=Decimal("0"), nullable=False
     )
     holding_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default="OPEN", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN", nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

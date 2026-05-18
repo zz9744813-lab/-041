@@ -82,8 +82,18 @@ def _rule_based_review(trade: Trade) -> ReviewOutput:
     )
 
 
-def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) -> Review:
-    """Generate (or regenerate) a Review for a closed trade."""
+def generate_for_trade(
+    db: Session,
+    trade_id: int,
+    now: datetime | None = None,
+    on_event=None,
+) -> Review:
+    """Generate (or regenerate) a Review for a closed trade.
+
+    `on_event` is forwarded to `llm_client.call_llm_structured` so callers
+    can stream `thinking_delta` / `text_delta` / `attempt_*` events to an
+    SSE client.
+    """
     now = now or utc_now()
     trade = db.get(Trade, trade_id)
     if trade is None:
@@ -109,6 +119,7 @@ def generate_for_trade(db: Session, trade_id: int, now: datetime | None = None) 
             schema=ReviewOutput,
             model_override=settings.narration_model,
             now=now,
+            on_event=on_event,
         )
         if parsed is not None:
             review_data = parsed

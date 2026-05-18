@@ -1,4 +1,7 @@
-"""Trade review job - generate Reviews for trades closed today."""
+"""Trade review job - generate Reviews for trades closed today.
+
+v2.1: bulk-loads existing review trade_ids in one query instead of N+1.
+"""
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -16,24 +19,30 @@ def run(now: datetime | None = None) -> dict:
     db = SessionLocal()
     try:
         cutoff = now - timedelta(days=1)
-        # Find CLOSED trades that don't have a review yet
-        stmt = (
-            select(Trade)
-            .where(Trade.status == "CLOSED", Trade.exit_time >= cutoff)
+        trades = list(
+            db.scalars(
+                select(Trade).where(Trade.status == "CLOSED", Trade.exit_time >= cutoff)
+            ).all()
         )
-        trades = list(db.scalars(stmt).all())
+        if not trades:
+            return {"reviewed": 0, "skipped": 0, "checked": 0}
+
+        trade_ids = [t.id for t in trades]
+        existing_ids: set[int] = set(
+            db.scalars(select(Review.trade_id).where(Review.trade_id.in_(trade_ids))).all()
+        )
+
         reviewed = 0
         skipped = 0
         for t in trades:
-            existing = db.scalars(select(Review).where(Review.trade_id == t.id)).first()
-            if existing:
+            if t.id in existing_ids:
                 skipped += 1
                 continue
             try:
                 review_service.generate_for_trade(db, t.id, now=now)
                 db.commit()
                 reviewed += 1
-            except Exception as e:
+            except Exception:
                 db.rollback()
                 skipped += 1
         return {"reviewed": reviewed, "skipped": skipped, "checked": len(trades)}

@@ -11,15 +11,31 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { TradeRow } from '@/lib/types';
+import type { RMultipleScatterPoint, TradeRow } from '@/lib/types';
 
 interface Props {
-  trades: TradeRow[];
+  /** Either full TradeRow[] (legacy) or the lighter RMultipleScatterPoint[] (preferred). */
+  trades: Array<TradeRow | RMultipleScatterPoint>;
   height?: number;
+}
+
+function pickFields(t: TradeRow | RMultipleScatterPoint): {
+  exit_time: string | null;
+  realized_r_multiple: string | null;
+  symbol: string;
+  exit_reason: string | null;
+} {
+  return {
+    exit_time: t.exit_time ?? null,
+    realized_r_multiple: t.realized_r_multiple ?? null,
+    symbol: t.symbol,
+    exit_reason: t.exit_reason ?? null,
+  };
 }
 
 export function RMultipleScatter({ trades, height = 250 }: Props) {
   const data = trades
+    .map(pickFields)
     .filter((t) => t.realized_r_multiple !== null && t.exit_time)
     .map((t) => ({
       x: new Date(t.exit_time as string).getTime(),

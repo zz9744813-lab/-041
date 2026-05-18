@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -39,6 +39,11 @@ class Signal(Base):
     risk_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
     invalid_condition: Mapped[str] = mapped_column(Text, default="", nullable=False)
     follow_up_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why the LLM was even invoked: full StrategyScore breakdown
+    # (trend_score, setup_score, risk_score, volume_score,
+    # market_regime_score, risk_reward_score, raw_reason). Persisted as JSON
+    # so we don't have to chase 7 columns.
+    strategy_score: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # ---- LLM tracking (V2 § 8.5) ----
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -73,4 +78,31 @@ class Signal(Base):
     __table_args__ = (
         Index("ix_signals_sym_status", "symbol", "status"),
         Index("ix_signals_created_at", "created_at"),
+    )
+
+
+class SignalSkip(Base):
+    """Why we *didn't* generate a signal for a symbol in a given batch.
+
+    The job already logs reasons like "no_1d_candles", "no_strategy_score",
+    "below_threshold" but they used to die in the scheduler logs. Persisting
+    them lets the user answer "why didn't AAPL get a signal today?" from the
+    UI instead of digging through stderr.
+    """
+
+    __tablename__ = "signal_skips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_signal_skips_symbol_created", "symbol", "created_at"),
     )

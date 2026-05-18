@@ -1,9 +1,10 @@
 """FastAPI entry point."""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api import (
     routes_assets,
@@ -30,6 +31,45 @@ async def lifespan(app: FastAPI):
     logger.info("Mini Hermes shutting down")
 
 
+# Cache-Control rules per URL prefix. Values picked so the browser/SWR can
+# reuse the response on quick page switches but don't go too stale.
+# `immutable` is reserved for append-only resources (LlmCallLog rows).
+_CACHE_RULES: tuple[tuple[str, str], ...] = (
+    # Append-only by ID -> safe to cache hard.
+    ("/api/system/llm-logs/", "private, max-age=3600, immutable"),
+    ("/api/system/health/", "private, max-age=60"),
+    # Lists / aggregates - short cache acceptable (SWR also dedupes).
+    ("/api/assets", "private, max-age=300"),
+    ("/api/market/regime", "private, max-age=60"),
+    ("/api/system/llm-stats", "private, max-age=60"),
+    ("/api/system/llm-budget", "private, max-age=30"),
+)
+
+
+class CacheHeadersMiddleware(BaseHTTPMiddleware):
+    """Adds Cache-Control to GET responses on stable URL prefixes.
+
+    Skipped for SSE (text/event-stream) and any response that already sets
+    its own Cache-Control header.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.method != "GET":
+            return response
+        if response.headers.get("Cache-Control"):
+            return response
+        ctype = response.headers.get("Content-Type", "")
+        if ctype.startswith("text/event-stream"):
+            return response
+        path = request.url.path
+        for prefix, value in _CACHE_RULES:
+            if path == prefix or path.startswith(prefix):
+                response.headers["Cache-Control"] = value
+                break
+        return response
+
+
 app = FastAPI(
     title="Mini Hermes",
     description="AI 模拟交易与策略验证系统",
@@ -44,6 +84,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(CacheHeadersMiddleware)
 
 app.include_router(routes_assets.router, prefix="/api/assets", tags=["assets"])
 app.include_router(routes_market.router, prefix="/api/market", tags=["market"])
